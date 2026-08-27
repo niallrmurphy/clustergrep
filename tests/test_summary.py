@@ -155,3 +155,60 @@ def test_no_inflect_switches_off_irregulars_too(capsys, files):
     _, out, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "irr.log"),
                    "--no-inflect")
     assert out == ""
+
+
+def test_excerpt_replaces_the_page_of_text_with_a_window(capsys, files):
+    page = "x " * 400 + "the detainee escaped overnight " + "y " * 400
+    (files / "big.log").write_text(page + "\n")
+    _, full, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "big.log"))
+    _, cut, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "big.log"),
+                   "--excerpt")
+    assert len(cut) < len(full) / 5
+    assert "escaped" in cut
+
+
+def test_excerpt_width_is_respected(capsys, files):
+    page = "x " * 400 + "the detainee escaped overnight " + "y " * 400
+    (files / "big.log").write_text(page + "\n")
+    _, narrow, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "big.log"),
+                      "--excerpt", "40")
+    _, wide, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "big.log"),
+                    "--excerpt", "300")
+    assert len(narrow) < len(wide)
+
+
+def test_excerpt_json_carries_the_window_not_the_line(capsys, files):
+    page = "x " * 400 + "the detainee escaped overnight " + "y " * 400
+    (files / "big.log").write_text(page + "\n")
+    _, out, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "big.log"),
+                   "--excerpt", "--json")
+    row = json.loads(out.splitlines()[0])
+    assert "text" not in row
+    assert "escaped" in row["excerpt"]
+    assert len(row["excerpt"]) < 200
+
+
+def test_excerpt_and_only_matching_are_mutually_exclusive(capsys, files):
+    with pytest.raises(SystemExit):
+        cg(capsys, files, "-t", "0.2", "escape", str(files / "c.log"),
+           "-o", "--excerpt")
+    assert "not allowed with" in capsys.readouterr().err
+
+
+def test_a_nonsense_excerpt_width_is_rejected(capsys, files):
+    with pytest.raises(SystemExit):
+        cg(capsys, files, "-t", "0.2", "escape", str(files / "c.log"), "--excerpt", "0")
+    assert "--excerpt must be at least 1" in capsys.readouterr().err
+
+
+def test_each_excerpt_is_labelled_with_its_own_distance(capsys, files):
+    """A window showing a distant match must not borrow the distance of a
+    nearer one that appeared elsewhere in the same page."""
+    line = "the detainee escaped " + "x " * 300 + " a breakout followed"
+    (files / "two.log").write_text(line + "\n")
+    _, out, _ = cg(capsys, files, "-t", "0.25", "escape", str(files / "two.log"),
+                   "--excerpt", "60")
+    rows = out.splitlines()
+    assert len(rows) == 2
+    assert "0.00:escape:" in rows[0]
+    assert "0.25:breakout:" in rows[1]

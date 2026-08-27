@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.0
+
+- `--excerpt N` prints about N characters around each match instead of the
+  whole line, for corpora where one record is pages of text and the usual
+  grep-shaped output is unreadable. Overlapping windows in a line are merged,
+  each window is labelled with the distance of the match it contains rather
+  than the line's nearest, and a match longer than the window is still shown
+  whole. Under `--json` it replaces `text` with an `excerpt` field.
+
 ## 0.10.0
 
 - `--tune` drops cluster terms that fire far more often than the query word

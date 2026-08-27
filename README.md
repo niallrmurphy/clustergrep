@@ -237,6 +237,7 @@ Particular to this tool:
 | `--sense N` | pin one reading of the word |
 | `--tune` | drop cluster terms that fire far more often than the query |
 | `--summary` | report which terms fired and how often; print no lines |
+| `--excerpt N` | print ~N characters around each match, not the whole line |
 | `--stats` | the same report on stderr, alongside the normal results |
 | `--patterns` | every pattern that would match, for use as a prefilter |
 | `--sort` | nearest matches first |
@@ -283,7 +284,22 @@ $ clustergrep -t 0.25 escape big.jsonl --summary
 Ordering by distance rather than by count is deliberate: it reads as *how far
 did I reach, and what did that buy me* -- `-t` being how far, and the output
 being what you gained. `--summary --json` gives those results as one JSON object.
-For the matches themselves without the pages of text around them, `--json -o` omits the line.
+When you want the matches themselves rather than a tally, `--excerpt` prints
+a window of about 100 characters around each one instead of the whole line:
+
+```console
+$ clustergrep -t 0.25 escape big.jsonl --excerpt
+1:0.00:escape:…during unusual was wing east the the detainee escaped through a service corridor unusual overnight…
+41:0.20:flee:…the sensor although the the two inmates fled across the exercise yard nothing nothing the…
+81:0.15:elude:…the and wing the fence duty the suspect eluded officers for several hours shift duty the…
+```
+
+Windows overlapping in the same line are merged, so a paragraph mentioning the
+concept five times gives one readable excerpt rather than five near-identical
+ones, and each excerpt is labelled with the distance of the match it actually
+contains. `--excerpt N` sets the width; `-o` is the degenerate case of it,
+printing the match and nothing else. Under `--json` the window arrives as an
+`excerpt` field in place of `text`.
 
 `--patterns` answers the second. It prints every string the matcher would
 recognise — inflections included — which is exactly what a fast tool needs to

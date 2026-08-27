@@ -22,6 +22,7 @@ from typing import Iterable, Iterator, Sequence, TextIO
 
 from . import __version__
 from .cluster import Backend, BackendError, Cluster, normalise
+from .excerpt import excerpts
 from .matcher import Match, Matcher
 
 EXIT_MATCH = 0
@@ -30,6 +31,10 @@ EXIT_ERROR = 2
 
 DEFAULT_THRESHOLD = 0.4
 DEFAULT_MAX_TERMS = 250
+
+# Wide enough to judge a match in context, narrow enough that a screenful of
+# them stays a screenful.
+DEFAULT_EXCERPT = 100
 
 # Read this much of a file to decide whether it is text, as grep does.
 _SNIFF = 8192
@@ -121,8 +126,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="print only the names of files that matched")
     g.add_argument("-L", "--files-without-match", action="store_true",
                    help="print only the names of files that did not match")
-    g.add_argument("-o", "--only-matching", action="store_true",
-                   help="print only the matched text")
+    shown = g.add_mutually_exclusive_group()
+    shown.add_argument("-o", "--only-matching", action="store_true",
+                       help="print only the matched text")
+    shown.add_argument("--excerpt", nargs="?", type=int, const=DEFAULT_EXCERPT,
+                       metavar="N",
+                       help=f"print about N characters around each match "
+                            f"instead of the whole line (default "
+                            f"{DEFAULT_EXCERPT}); for corpora where one line "
+                            f"is pages of text")
     num = g.add_mutually_exclusive_group()
     num.add_argument("-n", "--line-number", dest="line_number",
                      action="store_true", default=True,
@@ -544,10 +556,16 @@ class Printer:
                     "term": None if m is None else m.term.text,
                     "matched": None if m is None else m.text,
                 }
-                # -o means "only what matched". On a corpus where one line is
-                # pages of text, echoing the line back is the difference
-                # between a usable stream and an unreadable one.
-                if not self.args.only_matching:
+                # On a corpus where one line is pages of text, echoing the
+                # line back is the difference between a usable stream and an
+                # unreadable one. -o wants only the match; --excerpt wants it
+                # with enough context to judge.
+                if self.args.excerpt and m is not None:
+                    windows = excerpts(
+                        hit.line, [(m.start, m.end)], self.args.excerpt
+                    )
+                    record["excerpt"] = windows[0].text if windows else ""
+                elif not self.args.only_matching:
                     record["text"] = hit.line
                 self.out.write(json.dumps(record) + "\n")
             return
@@ -555,7 +573,40 @@ class Printer:
             for m in sorted(hit.matches, key=lambda m: m.start):
                 self.out.write(f"{self._prefix(hit, m)}{self.ink.hit(m.text)}\n")
             return
+        if self.args.excerpt:
+            for window in excerpts(
+                hit.line, [(m.start, m.end) for m in hit.matches], self.args.excerpt
+            ):
+                nearest = self._nearest_in(hit, window)
+                self.out.write(
+                    f"{self._prefix(hit, nearest)}{self._paint(window)}\n"
+                )
+            return
         self.out.write(f"{self._prefix(hit, hit.best)}{self._highlight(hit)}\n")
+
+    def _nearest_in(self, hit: LineHit, window) -> Match | None:
+        """The nearest match this window actually contains.
+
+        Each excerpt is labelled with its own distance rather than the line's,
+        so a window showing a 0.4 match is not reported as 0.15 because
+        something nearer appeared elsewhere in the same page of text.
+        """
+        texts = {window.text[a:b].lower() for a, b in window.spans}
+        inside = [m for m in hit.matches if m.text.lower() in texts]
+        return min(inside or hit.matches, key=lambda m: m.distance, default=None)
+
+    def _paint(self, window) -> str:
+        if not self.ink.enabled:
+            return window.text
+        out, cursor = [], 0
+        for start, end in sorted(window.spans):
+            if start < cursor:
+                continue
+            out.append(window.text[cursor:start])
+            out.append(self.ink.hit(window.text[start:end]))
+            cursor = end
+        out.append(window.text[cursor:])
+        return "".join(out)
 
 
 def render_explain(cluster: Cluster, ink: Ink, out: TextIO) -> None:
@@ -671,6 +722,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_MATCH if ok else EXIT_ERROR
     if args.word is None:
         parser.error("a word to search for is required")
+    if args.excerpt is not None and args.excerpt < 1:
+        parser.error(f"--excerpt must be at least 1, got {args.excerpt}")
     if not 0.0 <= args.threshold <= 1.0:
         parser.error(f"--threshold must be between 0.0 and 1.0, got {args.threshold}")
 
