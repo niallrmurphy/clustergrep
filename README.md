@@ -235,6 +235,7 @@ Particular to this tool:
 | `--senses` | list the word's WordNet senses, for `--sense` |
 | `--pos n\|v\|a\|r` | one part of speech only |
 | `--sense N` | pin one reading of the word |
+| `--tune` | drop cluster terms that fire far more often than the query |
 | `--summary` | report which terms fired and how often; print no lines |
 | `--stats` | the same report on stderr, alongside the normal results |
 | `--patterns` | every pattern that would match, for use as a prefilter |
@@ -319,6 +320,52 @@ You cannot use `--explain` output as the pattern file: it holds `flee` where
 the text holds `fled`, so lines are dropped silently. That is what
 `--patterns` is for.
 
+### Terms that drown the search
+
+At scale the polysemy problem stops being theoretical. Searching a 6GB corpus
+for `escape` returned 395,587 matches, of which `run`, `break` and `miss` were
+91%. All three are legitimate WordNet neighbours — `run` is a lemma of
+`scat.v.01`, *"flee; take to one's heels"* — and all three are useless here.
+
+Lowering `-t` does not help: `miss` sits at 0.15, nearer than `jailbreak` at
+0.25. You would delete the signal and keep the noise.
+
+`--tune` removes them:
+
+```bash
+clustergrep -t 0.25 escape big.jsonl --summary --tune
+```
+
+```
+clustergrep: --tune dropped 3 term(s), cutting at a 12x jump in how often they fire versus the query:
+  run                     196055    9.5x
+  break                    95601    4.6x
+  miss                     70170    3.4x
+  re-run without --tune to keep them
+```
+
+It samples the corpus, counts how often each cluster term fires relative to
+the query word itself, and cuts at the largest jump in that ratio. The
+reasoning is that a term appearing ten times more often than the word you
+actually searched for is not being used in your sense of it.
+
+The cut is made at the jump rather than at a fixed threshold because no fixed
+threshold survives a second corpus: measured on two, the noise sat at 9.5x and
+80x while the nearest genuine term sat at 0.29x and 2.1x — any constant
+separating one pair nearly misclassifies the other, while the jump itself is
+11.8x and 38x. The corpus is asked where its own boundary lies.
+
+It declines to act rather than guess when the query is too rare in the sample
+to measure against, or when there is no clear separation, and it never drops a
+term firing less often than the query. **It always says what it did, on
+stderr.** A search tool that quietly discards terms would be worse than one
+that finds too much.
+
+It is a heuristic, and it has a real failure mode: search for `automobile` in
+a corpus that says `car`, and `car` looks exactly like `run` does. That is what
+the stderr report is for — if it drops something you wanted, drop `--tune` and
+pin a thesaurus instead.
+
 If the interesting text is one field of a JSONL record, cut it out first and
 scan less:
 
@@ -336,6 +383,11 @@ interchangeably, so the second pass is more permissive than the first.
 **Polysemy.** A cluster covers every sense of the word. At `-t 0.4`, "escape"
 reaches `leakage` and `outflow` via the concept of fluid-discharge, so a line about
 reactor coolant will match.
+
+**`--tune` is statistical, not semantic.** It can only see how often a term
+fires, so a genuine synonym that happens to be commoner than your query looks
+identical to a polysemous intruder. It reports every term it drops for exactly
+this reason.
 
 **Distances are not probabilities** and are not comparable between backends.
 They only order matches within one search.

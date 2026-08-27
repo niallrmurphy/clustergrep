@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0
+
+- `--tune` drops cluster terms that fire far more often than the query word
+  itself, which at scale is what polysemous intruders look like: on a 6GB
+  corpus, `run`, `break` and `miss` were 91% of all matches for `escape`.
+  The cut is made at the largest jump in the ratio rather than at a fixed
+  threshold, since no constant separated noise from signal on two different
+  corpora while the jump did so by margins of 11.8x and 38x. It declines to
+  act when the query is too rare to measure against or when no clear boundary
+  exists, never drops a term firing less often than the query, and always
+  reports what it dropped on stderr.
+
 ## 0.9.1
 
 - Irregular inflections now apply to every backend, not just wordnet. A

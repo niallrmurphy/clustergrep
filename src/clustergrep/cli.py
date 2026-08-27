@@ -14,12 +14,14 @@ import fnmatch
 import json
 import os
 import sys
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
+from itertools import chain
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence, TextIO
 
 from . import __version__
-from .cluster import Backend, BackendError, Cluster
+from .cluster import Backend, BackendError, Cluster, normalise
 from .matcher import Match, Matcher
 
 EXIT_MATCH = 0
@@ -139,6 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="emit one JSON object per match")
     g.add_argument("--stats", action="store_true",
                    help="alongside the results, report on stderr which terms fired")
+    g.add_argument("--tune", action="store_true",
+                   help="drop cluster terms that fire more often than the word "
+                        "you searched for, and say on stderr which were dropped")
     g.add_argument("--summary", action="store_true",
                    help="report only which terms fired and how often; print no lines")
     g.add_argument("--color", choices=("auto", "always", "never"), default="auto",
@@ -273,6 +278,141 @@ def build_cluster(args, backend: Backend, err: TextIO) -> Cluster:
         threshold=args.threshold,
         max_terms=args.max_terms,
     )
+
+
+# --tune identifies polysemous intruders by how often they fire relative to
+# the query word itself. Searching for "escape" in a corpus where "run"
+# appears ten times more often than "escape" does means "run" is not being
+# used in the escape sense.
+#
+# The cut is made at the largest multiplicative jump in that ratio rather than
+# at a fixed threshold, because no fixed threshold survives contact with a
+# second corpus. Measured: on a 6GB corpus the noise sat at 9.5x, 4.6x and
+# 3.4x with the nearest genuine term at 0.29x; on another, noise at 80x and
+# signal at 2.1x. Any constant separating one pair sits within a hair of
+# misclassifying the other, while the jump itself is 11.8x and 38x -- an
+# enormous margin in both. The corpus tells us where its own boundary is.
+TUNE_MIN_GAP = 3.0
+
+# Never drop a term that fires less often than the query. Without this, a
+# corpus containing no noise at all would still have a largest gap somewhere,
+# and --tune would invent a boundary to cut at.
+TUNE_FLOOR = 1.0
+
+# How much to read before judging. The sample only has to establish which
+# terms are common, not count them exactly, so it can be a small fraction of
+# a very large file -- deciding that "run" is too common should not cost as
+# much as the search it is tuning.
+TUNE_MIN_MATCHES = 2000
+TUNE_MAX_BYTES = 32 * 1024 * 1024
+
+# Every ratio is measured against the query's own count, so too few of those
+# makes the whole calculation noise. Below this, --tune declines to act.
+TUNE_MIN_QUERY = 20
+
+
+def tune(matcher: Matcher, paths, err: TextIO):
+    """Drop cluster terms that are drowning the query, in one bounded pass.
+
+    Returns (matcher, dropped, replay). ``replay`` holds lines already
+    consumed from stdin, which cannot be rewound and so must be handed back
+    to the real search.
+    """
+    counts, replay, read, matches = Counter(), [], 0, 0
+    query_key = normalise(matcher.cluster.query)
+
+    def enough() -> bool:
+        return (
+            matches >= TUNE_MIN_MATCHES and counts.get(query_key, 0) >= TUNE_MIN_QUERY
+        ) or read >= TUNE_MAX_BYTES
+
+    for path in paths:
+        if path is not None and looks_binary(path):
+            continue
+        try:
+            handle = (
+                sys.stdin if path is None
+                else path.open(encoding="utf-8", errors="replace")
+            )
+        except OSError:
+            continue
+        try:
+            for raw in handle:
+                if path is None:
+                    replay.append(raw)
+                read += len(raw)
+                for m in matcher.finditer(raw.rstrip("\n").rstrip("\r")):
+                    counts[m.term.text] += 1
+                    matches += 1
+                if enough():
+                    break
+        finally:
+            if path is not None:
+                handle.close()
+        if enough():
+            break
+
+    query = counts.get(query_key, 0)
+    dropped, gap = _suspects(counts, query_key, query)
+
+    if dropped:
+        kept = tuple(t for t in matcher.cluster.terms if t.text not in dropped)
+        matcher = Matcher(
+            replace(matcher.cluster, terms=kept),
+            inflect=matcher.inflect,
+            ignore_case=matcher.ignore_case,
+            word_variants=matcher.word_variants,
+        )
+
+    report(dropped, query, counts, gap, err)
+    return matcher, dropped, replay
+
+
+def _suspects(counts, query_key: str, query: int):
+    """Terms above the largest jump in fire-rate. Returns (dropped, gap)."""
+    if query < TUNE_MIN_QUERY:
+        return {}, 0.0
+    ratios = {
+        term: n / query for term, n in counts.items() if term != query_key
+    }
+    ranked = sorted(ratios.items(), key=lambda kv: -kv[1])
+    cut, gap = None, 1.0
+    for i in range(len(ranked) - 1):
+        high, low = ranked[i][1], ranked[i + 1][1]
+        if low > 0 and high / low > gap:
+            gap, cut = high / low, i
+    if cut is None or gap < TUNE_MIN_GAP:
+        return {}, gap
+    return {
+        term: (counts[term], ratio)
+        for term, ratio in ranked[: cut + 1]
+        if ratio > TUNE_FLOOR
+    }, gap
+
+
+def report(dropped, query: int, counts, gap: float, err: TextIO) -> None:
+    """Say what --tune did. Deciding quietly would be the one unacceptable
+    way for this to work."""
+    if query < TUNE_MIN_QUERY:
+        err.write(
+            f"clustergrep: --tune saw the query itself only {query} time(s) in "
+            f"its sample, too few to measure the others against; "
+            f"cluster unchanged\n"
+        )
+        return
+    if not dropped:
+        err.write(
+            f"clustergrep: --tune kept all {len(counts)} term(s) that fired; "
+            f"no clear separation from the query's own rate\n"
+        )
+        return
+    err.write(
+        f"clustergrep: --tune dropped {len(dropped)} term(s), cutting at a "
+        f"{gap:.0f}x jump in how often they fire versus the query:\n"
+    )
+    for term, (n, ratio) in sorted(dropped.items(), key=lambda kv: -kv[1][1]):
+        err.write(f"  {term:<20} {n:>9}  {ratio:5.1f}x\n")
+    err.write("  re-run without --tune to keep them\n")
 
 
 # ---------------------------------------------------------------- searching
@@ -592,9 +732,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     return run_search(args, matcher, ink, out, warn)
 
 
-def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn) -> int:
-    from collections import Counter
-
+def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
+               replay: list[str] | None = None) -> int:
     if args.files:
         paths: list[Path | None] = list(
             walk(args.files, recursive=args.recursive, include=args.include,
@@ -611,6 +750,10 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn) -> int:
     counting = args.count or args.files_with_matches or args.files_without_match
     quiet = counting or args.summary
     need_matches = args.stats or args.summary or not (quiet or args.invert_match)
+
+    replay: list[str] = []
+    if args.tune:
+        matcher, _, replay = tune(matcher, paths, sys.stderr)
 
     printer = Printer(args, ink, out)
     fired: Counter = Counter()
@@ -630,6 +773,9 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn) -> int:
         except OSError as exc:
             warn(f"{label}: {exc.strerror}")
             continue
+        if path is None and replay:
+            # --tune already consumed these from a stream that cannot seek.
+            handle = chain(replay, handle)
 
         count = 0
         try:

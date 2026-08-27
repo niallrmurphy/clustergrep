@@ -50,6 +50,8 @@ class Matcher:
         self.cluster = cluster
         self.inflect = inflect
         self.ignore_case = ignore_case
+        # Kept so a pruned copy can be rebuilt identically; see cli.tune.
+        self.word_variants = word_variants
 
         # Every pattern we will accept, mapped back to the term that
         # justifies it. On collision the nearest term wins, so a word that is
