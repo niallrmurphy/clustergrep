@@ -130,3 +130,23 @@ def test_tune_also_prunes_what_patterns_emits(capsys, files):
     """So the prefilter for the next run drops the noise too."""
     _, wide, _ = cg(capsys, files, "-t", "0.25", "escape", "--patterns")
     assert "run" in wide.split()
+
+
+def test_patterns_can_be_tuned_against_the_corpus(capsys, files):
+    """A prefilter built from untuned patterns keeps every line containing the
+    noise -- which on a corpus where the noise is the common case means it
+    discards almost nothing, and the fast path is not fast."""
+    _, wide, _ = cg(capsys, files, "-t", "0.25", "escape", "--patterns")
+    _, tuned, err = cg(capsys, files, "-t", "0.25", "escape",
+                       str(files / "c.log"), "--patterns", "--tune")
+    assert "run" in wide.split()
+    assert "run" not in tuned.split()
+    assert "miss" not in tuned.split()
+    assert "jailbreak" in tuned.split()
+    assert "--tune dropped" in err
+
+
+def test_tuned_patterns_keep_the_irregulars_of_what_survives(capsys, files):
+    _, tuned, _ = cg(capsys, files, "-t", "0.25", "escape",
+                     str(files / "c.log"), "--patterns", "--tune")
+    assert "fled" in tuned.split()

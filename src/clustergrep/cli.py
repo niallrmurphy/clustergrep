@@ -779,21 +779,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     if args.patterns:
+        if args.tune:
+            # Without this the prefilter keeps every line containing the
+            # noise, which on a corpus where the noise is the common case
+            # means it discards almost nothing and the fast path is not fast.
+            matcher, _, _ = tune(matcher, input_paths(args, warn), err)
         out.write("".join(f"{pattern}\n" for pattern in matcher.patterns()))
         return EXIT_MATCH
 
     return run_search(args, matcher, ink, out, warn)
 
 
+def input_paths(args, warn) -> "list[Path | None]":
+    if not args.files:
+        return [None]
+    return list(
+        walk(args.files, recursive=args.recursive, include=args.include,
+             exclude=args.exclude, warn=warn)
+    )
+
+
 def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
                replay: list[str] | None = None) -> int:
-    if args.files:
-        paths: list[Path | None] = list(
-            walk(args.files, recursive=args.recursive, include=args.include,
-                 exclude=args.exclude, warn=warn)
-        )
-    else:
-        paths = [None]
+    paths = input_paths(args, warn)
 
     if args.filename is None:
         args.filename = len(paths) > 1 or args.recursive

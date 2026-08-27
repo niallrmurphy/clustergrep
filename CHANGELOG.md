@@ -2,6 +2,12 @@
 
 ## 0.11.0
 
+- `--patterns --tune` tunes the pattern list against the corpus before
+  emitting it, so the prefilter drops the noise too. Without it the filter
+  keeps every line containing `run`, `break` or `miss` -- which on a corpus
+  where those are the common case means it discards almost nothing, and the
+  documented fast path is not fast.
+
 - `--excerpt N` prints about N characters around each match instead of the
   whole line, for corpora where one record is pages of text and the usual
   grep-shaped output is unreadable. Overlapping windows in a line are merged,
