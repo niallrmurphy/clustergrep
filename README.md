@@ -1,17 +1,21 @@
 # clustergrep
 
-grep for a concept rather than a string, and tell you how far each match sat
+grep for a concept rather than a string, and tell you how far each match is
 from what you asked for.
 
-`grep` is built for text you can spell in advance: a request id, a timestamp,
-a stack frame. It is a poor fit for the other common search, the one where you
-know the *idea* and not the words — every line about an escape, a failure, a
-complaint. Today that becomes `grep -E 'escape|flee|jailbreak|breakout'`, which
-is tedious, silently incomplete, and stale the moment someone coins a new term.
+`grep` is mostly used for fixed or moderately varying text that you can determine
+in advance: a fixed log line string (e.g. "reboot"), a well-formed timestamp,
+a string which is known to occur around another particular string ("login for niallm
+failed"). It is a poor fit for the other common search, the one where you
+know the *idea* and not the words — for example the concept "escape".
+Today we use something like `grep -E 'escape|flee|jailbreak|breakout'`, which
+is inelegant, incomplete, and stale after we invent a new word for something,
+which we seem to be doing a lot these days. Handing the whole job to a language model
+trades those problems for different, potentially worse ones: hallucination,
+skipping lines or an entire file, or answering differently this Tuesday as
+opposed to last one.
 
-Handing the whole job to a language model trades those problems for worse ones:
-a search that may hallucinate a line, quietly skip a file, or answer differently
-on Tuesday. clustergrep splits the difference. A lexical model decides *what to
+clustergrep splits the difference. A lexical model decides *what to
 look for*, once, up front, where you can read it and argue with it. After that,
 finding it is ordinary deterministic matching with nothing in the loop.
 
@@ -28,12 +32,19 @@ $ clustergrep -t 0.25 escape incidents.log
 12:0.15:break loose:2024-01-13 The detainee broke loose during transfer.
 ```
 
-The two extra fields are the point. `0.25:jailbreak` says *this line matched
-because "jailbreak" is 0.25 away from "escape"* — so you can judge the hit
-without rereading the line, and you can tighten `-t` until the noise stops.
+Of course, this matching surrenders the previous boolean does/doesn't match
+approach, in favour of a notion of the _conceptual distance_ between the term
+you searched for and what was found. This means that we report lines that matched,
+and also the extent to which they matched. In the above, `0.25:jailbreak` says
+*this line matched because "jailbreak" is 0.25 away from "escape"*. You can tune
+`-t`, the flag that sets the conceptual/lexical distance until you're satisfied
+with the results.
 
 Note "fled" and "broke loose": clustergrep matches irregular inflections, so
 the cluster does not have to enumerate them.
+
+At the moment clustergrep does not handle non-English, but this is very definitely
+an ambition.
 
 ## Install
 
@@ -42,8 +53,8 @@ pip install clustergrep
 clustergrep --install-data      # once: fetches the WordNet corpus
 ```
 
-**The corpus is not bundled.** WordNet is about 10MB and carries Princeton's
-own licence, so clustergrep downloads it on request into a per-user directory
+**The corpus is not bundled.** WordNet is about 10MB and is licensed separately
+by Princeton, so clustergrep downloads it on request into a per-user directory
 rather than shipping a copy. If you already have it — from a previous `nltk`
 install, a system package, or `NLTK_DATA` — that copy is found first and
 nothing is downloaded.
@@ -80,7 +91,7 @@ uv run pytest -q
 
 ## Distance
 
-Distance runs from 0.0 to 1.0 and is the whole interface:
+Distance runs from 0.0 to 1.0.
 
 | | |
 |---|---|
@@ -98,13 +109,14 @@ $ clustergrep -t 0 --no-inflect -s --no-distance Guards incidents.log
 $ grep -n -w -F Guards incidents.log            # identical output
 ```
 
-Matching is always word-oriented, like `grep -w`, because concepts are words.
+*Notable distinction from grep*: cluster matching is always word-oriented,
+like `grep -w`, because concepts are words, and root/syllabic tokenisation would
+result in undue implementation copmlexity right now.
 
 ### Where the numbers come from
 
-The default backend walks WordNet as a weighted graph and charges for each
-relation it crosses. Every distance is therefore the cost of a real path, and
-`--explain` will show you it:
+The default backend walks WordNet as a weighted graph with costed vertices.
+Every distance is therefore a summed path, which `--explain` will show:
 
 ```console
 $ clustergrep --explain -t 0.2 escape
@@ -138,10 +150,9 @@ $ clustergrep --explain -t 0.2 escape
 
 Narrowing costs less than broadening, because a narrower term keeps you inside
 the concept while a broader one leaves it. Each successive dictionary sense of
-the word adds 0.05, so the dominant reading dominates the cluster.
-
-These costs are judgements, not measurements. They are worth exactly as much as
-`--explain` says they are.
+the word adds 0.05, so the dominant reading dominates the cluster. There is little
+that is truly objective about this scoring, but is pragmatically enough to work
+with right now, and we are open to other suggestions.
 
 ## Backends
 
@@ -151,25 +162,20 @@ These costs are judgements, not measurements. They are worth exactly as much as
 --backend thesaurus    --thesaurus terms.tsv
 ```
 
-**wordnet** knows relations a lexicographer wrote down. That makes it precise
-and auditable, and blind to plain association: "escape" and "jail" have no
-WordNet path worth the name.
+**wordnet** just knows lexicographic relations: relatively precise, but only
+lexically bound, so "escape" and "jail" have no plausible path.
 
-**vectors** is the opposite trade. Cosine distance over any GloVe or word2vec
-text export finds `escape → jail` immediately, and cannot tell you why. Parsed
-models are cached, so only the first run pays for loading. Distances are not
-comparable with WordNet's — read `--explain` before trusting a threshold.
+**vectors** is the opposite. Cosine distance over any GloVe or word2vec
+text export "knows" that `escape → jail` immediately but isn't comparably
+enumerable as a path from an accessible graph search.
 
-**thesaurus** is a TSV file you own:
+**thesaurus** is a patch file you can use to add your own terms:
 
 ```
 # concept   term          distance   note
 escape      jailbreak     0.25
 escape      exfil         0.30       our term for it
 ```
-
-This is the answer to staleness and to jargon. Generate a starting point, edit
-it, commit it next to the code it searches:
 
 ```bash
 clustergrep --explain -t 0.3 escape --tsv > escape.tsv
@@ -199,7 +205,7 @@ Particular to this tool:
 | `--no-inflect` | exact surface forms only |
 | `--no-distance` | grep-shaped output |
 
-`--stats` is the tuning tool. It shows which terms earned their place:
+`--stats` is for tuning: 
 
 ```console
 $ clustergrep -t 0.4 escape incidents.log --stats -c
@@ -219,28 +225,22 @@ $ clustergrep -t 0.4 escape incidents.log --stats -c
 ## Known limits
 
 **Polysemy.** A cluster covers every sense of the word. At `-t 0.4`, "escape"
-reaches `leakage` and `outflow` via the fluid-discharge sense, so a line about
-reactor coolant matches. The sense penalty pushes such terms further out — which
-is why the distance is on every line — and `--pos v`, `--sense N` or a pinned
-TSV removes them entirely.
-
-**Common words.** `run`, `break`, `miss` and `flight` are all legitimately
-within 0.25 of "escape", and in real prose they fire constantly. `--stats` finds
-the culprit; a pinned thesaurus is the fix.
+reaches `leakage` and `outflow` via the concept of fluid-discharge, so a line about
+reactor coolant will match.
 
 **Distances are not probabilities** and are not comparable between backends.
-They order matches within one search. That is all they claim to do.
+They only order matches within one search.
 
-**English only**, and only as current as WordNet 3.0 — which is the case the
-thesaurus backend exists to cover.
+**English only**, and only as current as WordNet 3.0.
 
 **Irregular inflections** (`fled`, `broke`) come from WordNet's exception lists,
 so they are available under the default backend. The vectors and thesaurus
-backends get regular suffix rules only; spell irregulars out in the TSV.
+backends get regular suffix rules only: if you have a specific requirement,
+put them in the TSV.
 
 **Speed.** Roughly 8µs per line — about 5s for a 24MB, 300k-line file, against
-0.02s for `grep -E`. The cost is Python's regex engine over a large alternation,
-and it is the price of the extra columns. For a hot loop over gigabytes, use
+0.02s for `grep -E`. This is Python's regex engine over a large alternation
+the extra columns. For now, if you need fast loops over lots of data, use 
 `--explain` to generate the alternation and hand it to real grep.
 
 ## Licence
