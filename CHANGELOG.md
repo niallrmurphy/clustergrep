@@ -2,6 +2,12 @@
 
 ## 0.11.0
 
+- Fixed: piping into `head`, or any reader that leaves early, produced a
+  `BrokenPipeError` traceback and a second one while flushing at exit.
+  A closed pipe now ends the run quietly with the conventional exit status,
+  as it does for grep, and Ctrl-C no longer prints a stack trace either.
+  Both erase a half-drawn progress line on the way out.
+
 - A progress report on stderr for slow searches: percentage, throughput and
   an estimate when the input can be sized, throughput alone when it is a
   pipe. Time-triggered rather than size-triggered, so a quick search stays

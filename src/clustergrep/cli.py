@@ -29,6 +29,10 @@ from .matcher import Match, Matcher
 EXIT_MATCH = 0
 EXIT_NO_MATCH = 1
 EXIT_ERROR = 2
+# Conventional shell values, so `set -o pipefail` and Ctrl-C behave the way
+# they do for every other tool in the pipeline.
+EXIT_INTERRUPTED = 130
+EXIT_BROKEN_PIPE = 141
 
 DEFAULT_THRESHOLD = 0.4
 DEFAULT_MAX_TERMS = 250
@@ -720,6 +724,49 @@ def build_backend(args) -> Backend:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Entry point. Ends the way a Unix tool should when interrupted.
+
+    `clustergrep ... | head` closes the pipe as soon as head has what it
+    wants, and the next write raises. Reporting that as a traceback would be
+    noise: the user got exactly what they asked for. Ctrl-C is the same --
+    it is an instruction, not a failure.
+    """
+    try:
+        return _run(argv)
+    except BrokenPipeError:
+        _erase_progress()
+        _discard_stdout()
+        return EXIT_BROKEN_PIPE
+    except KeyboardInterrupt:
+        _erase_progress()
+        sys.stderr.write("\n")
+        return EXIT_INTERRUPTED
+
+
+def _erase_progress() -> None:
+    """Clear a half-drawn progress line the search never got to erase itself."""
+    try:
+        if sys.stderr.isatty():
+            sys.stderr.write("\r\033[K")
+            sys.stderr.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def _discard_stdout() -> None:
+    """Point stdout at nowhere so the interpreter's final flush cannot raise.
+
+    Without this, Python reports a second BrokenPipeError while shutting
+    down, after we have already handled the first.
+    """
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass
+
+
+def _run(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parse_argv(parser, argv)
     out, err = sys.stdout, sys.stderr
