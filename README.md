@@ -49,8 +49,11 @@ rules are not.)
 
 ## Install
 
+One of:
 ```bash
 uv tool install clustergrep
+pip install clustergrep
+pipx install clustergrep
 ```
 
 `uv tool` gives it an isolated environment, so `nltk` and its dependencies
@@ -62,26 +65,24 @@ installing anything, `uvx clustergrep -t 0.25 escape incidents.log`.
 same idea as `uv tool` if that is what you already have.
 
 For the vectors backend, ask for the extra at install time — these
-environments are isolated, so numpy cannot be added to one afterwards:
+environments are isolated, so numpy isn't easily added afterwards.
 
 ```bash
 uv tool install 'clustergrep[vectors]'
 ```
 
 The first search will offer to fetch the WordNet corpus, or you can get it
-over with up front:
+over with at the very start:
 
 ```bash
 clustergrep --install-data
 ```
 
-You are only asked when you are at a terminal to answer. In a pipeline, a cron
-job or CI, a missing corpus is an error telling you to run `--install-data`,
-so nothing ever reaches the network because a script happened to run
-clustergrep. (A wheel has no post-install hook — installers unpack files and
-never execute anything — so first run is the earliest honest moment to ask.)
+You will only be asked to install the data in an interactive terminal; when that's
+not available (e.g. pipeline, cron job, CI), you get an error telling you
+to run `--install-data`.
 
-**The corpus is not bundled.** WordNet is about 10MB and is licensed separately
+**The corpus is not bundled.** As above, WordNet is about 10MB and is licensed separately
 by Princeton, so clustergrep downloads it on request into a per-user directory
 rather than shipping a copy. If you already have it — from a previous `nltk`
 install, a system package, or `NLTK_DATA` — that copy is found first and
