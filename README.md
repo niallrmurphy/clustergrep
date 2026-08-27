@@ -293,24 +293,41 @@ clustergrep -t 0.25 escape --patterns > patterns.txt
 ```
 
 ```bash
-grep -Fw -f patterns.txt big.jsonl | clustergrep -t 0.25 escape --summary
+rg -Fw -f patterns.txt big.jsonl | clustergrep -t 0.25 escape --summary
 ```
 
-grep discards the 98% of lines with nothing in them, and clustergrep does the
-distance work on what survives. On a 300MB JSONL that is 52 seconds down to
-3, with byte-identical output. Use `rg -Fw -f` if you have ripgrep.
-Unfortunately, you cannot use `--explain` output directly here because of inflections:
-use `--patterns` instead.
+ripgrep discards the 98% of lines with nothing in them, and clustergrep does
+the distance work on what survives. On a 300MB JSONL that is 54 seconds down
+to 1.5, with byte-identical output.
+
+**Use ripgrep, or GNU grep, and not the `grep` that came with macOS.** BSD
+grep degrades catastrophically on a `-f` file of a few hundred patterns —
+measured on the same 300MB JSONL, all three producing identical output:
+
+| | 300MB | extrapolated to 6GB |
+|---|---|---|
+| `rg -Fw -f` then clustergrep | 1.5s | **~30s** |
+| clustergrep alone, no prefilter | 54s | ~18 min |
+| `/usr/bin/grep -Fw -f` then clustergrep | 432s | ~2.5 hours |
+
+That is not a typo: on macOS the obvious prefilter is roughly eight times
+*slower* than doing no prefiltering at all. `brew install ripgrep`, or
+`brew install grep` for GNU grep as `ggrep`. On Linux the distribution `grep`
+is GNU grep and is fine.
+
+You cannot use `--explain` output as the pattern file: it holds `flee` where
+the text holds `fled`, so lines are dropped silently. That is what
+`--patterns` is for.
 
 If the interesting text is one field of a JSONL record, cut it out first and
 scan less:
 
 ```bash
-jq -r '.text' big.jsonl | grep -Fw -f patterns.txt | clustergrep -t 0.25 escape --summary
+jq -r '.text' big.jsonl | rg -Fw -f patterns.txt | clustergrep -t 0.25 escape --summary
 ```
 
-One caveat on all of these: `grep -F` matches literally, so a hyphenated
-multi-word term (e.g. `fly-the-coop`) will of course be treated literally. 
+One caveat on all of these: `-F` matches literally, so a hyphenated
+multi-word term (e.g. `fly-the-coop`) will of course be treated literally.
 clustergrep itself accepts spaces, hyphens and underscores
 interchangeably, so the second pass is more permissive than the first.
 
@@ -325,10 +342,12 @@ They only order matches within one search.
 
 **English only**, and only as current as WordNet 3.0.
 
-**Irregular inflections** (`fled`, `broke`) come from WordNet's exception lists,
-so they are available under the default backend. The vectors and thesaurus
-backends get regular suffix rules only: if you have a specific requirement,
-put them in the TSV.
+**Irregular inflections** (`fled`, `broke`, `flew`) come from WordNet's
+exception lists and apply to every backend, including a thesaurus you pinned
+by hand — which spellings of a word exist is a fact about English, not about
+where the cluster came from. They are lost only if the corpus is not
+installed; `clustergrep --paths` will tell you. `--no-inflect` switches off
+regular and irregular forms together.
 
 **Speed.** Roughly 6MB/s. A 300MB file takes about 50 seconds, against 0.1s
 for `grep -E`. This comes from Python's regex engine working over an alternation

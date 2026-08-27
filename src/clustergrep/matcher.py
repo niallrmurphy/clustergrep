@@ -60,8 +60,12 @@ class Matcher:
             forms = {term.text}
             if inflect:
                 forms |= expand(term.text, _forms)
-            if word_variants is not None:
-                forms |= expand(term.text, lambda w: {_key(v) for v in word_variants(w)})
+                # Irregulars are the same job as the suffix rules above, just
+                # table-driven, so --no-inflect switches off both or neither.
+                if word_variants is not None:
+                    forms |= expand(
+                        term.text, lambda w: {_key(v) for v in word_variants(w)}
+                    )
             for form in forms:
                 form = _key(form)
                 held = self._lookup.get(form)

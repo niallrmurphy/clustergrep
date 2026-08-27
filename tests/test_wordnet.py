@@ -107,9 +107,12 @@ def test_unknown_words_expand_to_themselves(backend):
     assert [t.text for t in expand(backend, "gxqzzy", 0.4).terms] == ["gxqzzy"]
 
 
-def test_irregular_forms_are_offered_to_the_matcher(backend):
-    assert "fled" in backend.word_variants("flee")
-    assert "broke" in backend.word_variants("break")
+def test_irregular_forms_are_available(backend):
+    from clustergrep.wordnet import irregular_forms
+
+    assert "fled" in irregular_forms("flee")
+    assert "broke" in irregular_forms("break")
+    assert irregular_forms("gxqzzy") == ()
 
 
 def test_expansion_of_a_broad_word_stays_bounded(backend):

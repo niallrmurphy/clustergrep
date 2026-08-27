@@ -243,15 +243,6 @@ class WordNetBackend:
         ):
             yield s, MERONYM, "meronym"
 
-    def word_variants(self, word: str) -> Iterable[str]:
-        """Irregular forms of a word: flee -> fled, break -> broke.
-
-        The matcher's suffix rules cannot derive these, and a concept search
-        that misses "fled" while finding "flees" is not much of a concept
-        search. WordNet ships the lexicon that has them.
-        """
-        return _irregular_forms().get(word.replace("_", " ").lower(), ())
-
     def describe_senses(self, word: str) -> list[tuple[int, str, str, list[str]]]:
         """(index, synset name, gloss, lemmas) for each sense -- for --senses."""
         return [
@@ -294,6 +285,26 @@ def _within(cost: float, threshold: float) -> bool:
     return cost <= threshold + _EPS
 
 
+def irregular_forms(word: str) -> tuple[str, ...]:
+    """Irregular inflections of a word: flee -> fled, break -> broke.
+
+    This is morphology, not semantics. Which spellings of a word exist is a
+    fact about English, not about where the cluster came from, so it applies
+    to every backend. Without that, a thesaurus you pinned by hand stops
+    matching "fled" while still matching "flees" -- and nothing tells you,
+    which is the worst way for a search tool to be wrong.
+
+    Returns () rather than raising when the corpus is absent: losing
+    irregulars costs recall but breaks nothing, and the vectors and thesaurus
+    backends must keep working without WordNet installed.
+    """
+    try:
+        table = _irregular_forms()
+    except Exception:
+        return ()
+    return table.get(word.replace("_", " ").lower(), ())
+
+
 @lru_cache(maxsize=1)
 def _irregular_forms() -> dict[str, tuple[str, ...]]:
     """Reverse WordNet's exception lists into base form -> inflected forms.
@@ -304,7 +315,10 @@ def _irregular_forms() -> dict[str, tuple[str, ...]]:
     """
     import nltk
 
-    register_data_path()
+    try:
+        register_data_path()
+    except BackendError:
+        return {}
     reverse: dict[str, set[str]] = {}
     for name in ("verb.exc", "noun.exc", "adj.exc", "adv.exc"):
         try:

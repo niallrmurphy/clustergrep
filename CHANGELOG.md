@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.1
+
+- Irregular inflections now apply to every backend, not just wordnet. A
+  pinned thesaurus holding `flee` matches `fled` again; previously it did
+  not, and nothing said so -- the pattern file generated for a prefilter
+  dropped them too, so the loss compounded. `--no-inflect` now switches off
+  regular and irregular forms together, rather than only the regular ones.
+
+- Corrected the large-file recipe, which recommended `grep -Fw -f`. That
+  benchmark was taken in a shell where `grep` was silently aliased to ugrep.
+  BSD grep, the default on macOS, takes 432s on the 300MB sample where
+  ripgrep takes 1.5s -- making the documented prefilter about eight times
+  slower than no prefilter at all. The recipe now uses `rg`, and says so.
+
 ## 0.9.0
 
 - `--summary` reports which cluster terms fired and how often, ordered by

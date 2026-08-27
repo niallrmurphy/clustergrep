@@ -91,7 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="list the word's WordNet senses and exit")
     g.add_argument("--patterns", action="store_true",
                    help="print every pattern that would match, one per line, "
-                        "and exit; feed to grep -Fw -f as a prefilter")
+                        "and exit; feed to rg -Fw -f as a prefilter (not BSD "
+                        "grep, which is far slower than no prefilter at all)")
 
     g = p.add_argument_group("matching")
     case = g.add_mutually_exclusive_group()
@@ -573,11 +574,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Inflection is morphology, not semantics: "escaped" is the same word as
     # "escape", not a more distant one. So it stays on its own axis and does
     # not quietly switch itself off when --threshold is 0.
+    from .wordnet import irregular_forms
+
     matcher = Matcher(
         cluster,
         inflect=args.inflect,
         ignore_case=args.ignore_case,
-        word_variants=getattr(backend, "word_variants", None),
+        # Every backend gets these, not just wordnet: "fled" is a spelling of
+        # "flee" no matter which lexicon proposed "flee" in the first place.
+        word_variants=irregular_forms,
     )
 
     if args.patterns:

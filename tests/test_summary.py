@@ -129,3 +129,29 @@ def test_json_without_only_matching_still_carries_the_line(capsys, files):
                    "--json")
     rows = [json.loads(l) for l in out.splitlines()]
     assert all("text" in r for r in rows)
+
+
+def test_a_pinned_thesaurus_still_matches_irregular_inflections(capsys, files):
+    """Irregular inflection is a fact about English, not about the backend.
+
+    A hand-pinned cluster holding "flee" must still find "fled", or the file
+    you pinned for reproducibility silently loses recall and nothing says so.
+    """
+    pytest.importorskip("nltk")
+    from clustergrep.wordnet import irregular_forms
+
+    if not irregular_forms("flee"):
+        pytest.skip("WordNet corpus not installed")
+
+    (files / "irr.log").write_text("two inmates fled the yard\n")
+    code, out, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "irr.log"))
+    assert code == EXIT_MATCH
+    assert "fled" in out
+
+
+def test_no_inflect_switches_off_irregulars_too(capsys, files):
+    """--no-inflect means the exact patterns, so both halves of morphology go."""
+    (files / "irr.log").write_text("two inmates fled the yard\n")
+    _, out, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "irr.log"),
+                   "--no-inflect")
+    assert out == ""
