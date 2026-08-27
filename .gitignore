@@ -5,3 +5,10 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Corpora and generated artefacts. Data being searched must never be
+# committed: it is the user's, it is usually large, and it is often private.
+*.jsonl
+*.tsv
+patterns.txt
+OUT.*
