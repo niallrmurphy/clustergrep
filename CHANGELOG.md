@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+- The first search now offers to download the WordNet corpus, so installing
+  and using clustergrep is one command rather than two. You are asked only
+  when you are at a terminal to answer: in a pipeline, cron job or CI a
+  missing corpus remains an error pointing at `--install-data`, and nothing
+  reaches the network unprompted.
+- README recommends `uv tool install`, which gives the CLI an isolated
+  environment and puts it on PATH.
+
 ## 0.8.0
 
 First public release.

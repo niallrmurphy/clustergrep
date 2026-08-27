@@ -50,9 +50,36 @@ rules are not.)
 ## Install
 
 ```bash
-pip install clustergrep
-clustergrep --install-data      # once: fetches the WordNet corpus
+uv tool install clustergrep
 ```
+
+`uv tool` gives it an isolated environment, so `nltk` and its dependencies
+never collide with anything else, and puts `clustergrep` on your PATH. If the
+shell cannot find it afterwards, `uv tool update-shell`. To try it without
+installing anything, `uvx clustergrep -t 0.25 escape incidents.log`.
+
+`pip install clustergrep` works too, and `pipx install clustergrep` is the
+same idea as `uv tool` if that is what you already have.
+
+For the vectors backend, ask for the extra at install time — these
+environments are isolated, so numpy cannot be added to one afterwards:
+
+```bash
+uv tool install 'clustergrep[vectors]'
+```
+
+The first search will offer to fetch the WordNet corpus, or you can get it
+over with up front:
+
+```bash
+clustergrep --install-data
+```
+
+You are only asked when you are at a terminal to answer. In a pipeline, a cron
+job or CI, a missing corpus is an error telling you to run `--install-data`,
+so nothing ever reaches the network because a script happened to run
+clustergrep. (A wheel has no post-install hook — installers unpack files and
+never execute anything — so first run is the earliest honest moment to ask.)
 
 **The corpus is not bundled.** WordNet is about 10MB and is licensed separately
 by Princeton, so clustergrep downloads it on request into a per-user directory
@@ -77,9 +104,13 @@ cache    /home/you/.cache/clustergrep
 wordnet  /home/you/.local/share/clustergrep/corpora/wordnet.zip
 ```
 
-Uninstalling is `pip uninstall clustergrep` and deleting those two
-directories. Nothing else is written. The cache holds only files clustergrep
-can rebuild, so deleting it alone is always safe.
+The corpus is fetched once per machine, not once per install: it lives in
+the data directory rather than the environment, so `uvx` runs reuse it and
+switching from `uvx` to `uv tool install` will not download it again.
+
+Uninstalling is `uv tool uninstall clustergrep` (or `pip uninstall`) and
+deleting those two directories. Nothing else is written. The cache holds only
+files clustergrep can rebuild, so deleting it alone is always safe.
 
 ### From source
 

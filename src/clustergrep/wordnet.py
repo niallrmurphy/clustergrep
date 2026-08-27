@@ -43,6 +43,10 @@ SENSE_PENALTY = 0.05
 # slice of the language, so expansion stops at them.
 ABSTRACT_MIN_DEPTH = 4
 
+# The one remedy the CLI knows how to carry out itself; shared so that
+# recognising it never depends on matching prose.
+INSTALL_REMEDY = "clustergrep --install-data"
+
 _POS_ALIASES = {
     "n": "n", "noun": "n",
     "v": "v", "verb": "v",
@@ -102,7 +106,7 @@ def _load_wordnet():
     except LookupError as exc:
         raise BackendError(
             "the WordNet corpus is not installed (about 10MB, downloaded once)",
-            remedy="clustergrep --install-data",
+            remedy=INSTALL_REMEDY,
         ) from exc
     return wn
 

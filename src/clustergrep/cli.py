@@ -211,6 +211,64 @@ class Ink:
         return self._wrap("2", t)
 
 
+def _can_prompt() -> bool:
+    """Whether there is a person at a terminal to answer a question."""
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
+def offer_install(exc: BackendError, err: TextIO) -> bool:
+    """Offer to fetch the corpus, and report whether it is now present.
+
+    A wheel has no post-install hook -- installers unpack files and never
+    execute anything -- so the corpus cannot be fetched when the package is
+    installed. The next honest moment is the first run.
+
+    Only when someone is at a terminal to say yes, though. In a pipeline, a
+    cron job or CI the original error stands unchanged, so clustergrep never
+    reaches the network because a script happened to run it.
+    """
+    from .wordnet import INSTALL_REMEDY
+
+    if exc.remedy != INSTALL_REMEDY or not _can_prompt():
+        return False
+
+    from .paths import data_dir
+
+    err.write(f"clustergrep: {exc}\n")
+    err.write(f"Download it into {data_dir()} now? [Y/n] ")
+    err.flush()
+    try:
+        answer = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        err.write("\n")
+        return False
+    if answer not in ("", "y", "yes"):
+        return False
+
+    from .wordnet import install_data
+
+    ok, message = install_data()
+    err.write(message + "\n")
+    return ok
+
+
+def build_cluster(args, backend: Backend, err: TextIO) -> Cluster:
+    """Expand the query, fetching the corpus first if a person allows it."""
+    try:
+        terms = backend.expand(args.word, args.threshold)
+    except BackendError as exc:
+        if not offer_install(exc, err):
+            raise
+        terms = backend.expand(args.word, args.threshold)
+    return Cluster.build(
+        query=args.word,
+        backend=backend.name,
+        terms=terms,
+        threshold=args.threshold,
+        max_terms=args.max_terms,
+    )
+
+
 # ---------------------------------------------------------------- searching
 
 
@@ -440,13 +498,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 parser.error(f"--senses is only meaningful for --backend wordnet")
             return render_senses(backend, args.word, out)
 
-        cluster = Cluster.build(
-            query=args.word,
-            backend=backend.name,
-            terms=backend.expand(args.word, args.threshold),
-            threshold=args.threshold,
-            max_terms=args.max_terms,
-        )
+        cluster = build_cluster(args, backend, err)
     except BackendError as exc:
         warn(str(exc))
         if exc.remedy:
