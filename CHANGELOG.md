@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0
+## 0.8.1
 
 - The first search now offers to download the WordNet corpus, so installing
   and using clustergrep is one command rather than two. You are asked only
