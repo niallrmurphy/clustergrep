@@ -23,6 +23,7 @@ from typing import Iterable, Iterator, Sequence, TextIO
 from . import __version__
 from .cluster import Backend, BackendError, Cluster, normalise
 from .excerpt import excerpts
+from .progress import Progress
 from .matcher import Match, Matcher
 
 EXIT_MATCH = 0
@@ -160,6 +161,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="report only which terms fired and how often; print no lines")
     g.add_argument("--color", choices=("auto", "always", "never"), default="auto",
                    help="colourise output (default auto)")
+    g.add_argument("--progress", choices=("auto", "always", "never"),
+                   default="auto",
+                   help="report how far along a slow search is, on stderr "
+                        "(default auto: only at a terminal, and only once it "
+                        "has been running a couple of seconds)")
 
     p.add_argument("--install-data", action="store_true",
                    help="download the WordNet corpus (~10MB, once), then exit")
@@ -323,7 +329,8 @@ TUNE_MAX_BYTES = 32 * 1024 * 1024
 TUNE_MIN_QUERY = 20
 
 
-def tune(matcher: Matcher, paths, err: TextIO):
+def tune(matcher: Matcher, paths, err: TextIO,
+         progress: Progress | None = None):
     """Drop cluster terms that are drowning the query, in one bounded pass.
 
     Returns (matcher, dropped, replay). ``replay`` holds lines already
@@ -353,6 +360,8 @@ def tune(matcher: Matcher, paths, err: TextIO):
                 if path is None:
                     replay.append(raw)
                 read += len(raw)
+                if progress is not None:
+                    progress.advance(len(raw))
                 for m in matcher.finditer(raw.rstrip("\n").rstrip("\r")):
                     counts[m.term.text] += 1
                     matches += 1
@@ -363,6 +372,9 @@ def tune(matcher: Matcher, paths, err: TextIO):
                 handle.close()
         if enough():
             break
+
+    if progress is not None:
+        progress.done()
 
     query = counts.get(query_key, 0)
     dropped, gap = _suspects(counts, query_key, query)
@@ -450,6 +462,7 @@ def search_stream(
     invert: bool,
     limit: int | None,
     need_matches: bool = True,
+    progress: Progress | None = None,
 ) -> Iterator[LineHit]:
     """Yield the lines of ``stream`` that match, or that do not under ``invert``.
 
@@ -461,6 +474,8 @@ def search_stream(
     probe = matcher.regex.search
     found = 0
     for lineno, raw in enumerate(stream, 1):
+        if progress is not None:
+            progress.advance(len(raw))
         line = raw.rstrip("\n").rstrip("\r")
         if need_matches:
             matches = matcher.search(line)
@@ -790,6 +805,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     return run_search(args, matcher, ink, out, warn)
 
 
+def _total_bytes(paths) -> int | None:
+    """How much there is to read, when that is knowable.
+
+    Unknowable for stdin, which is exactly the case the documented pipeline
+    uses, so progress has to stay useful without it -- hence bytes and rate
+    rather than only a percentage.
+    """
+    if any(p is None for p in paths):
+        return None
+    total = 0
+    for path in paths:
+        try:
+            total += path.stat().st_size
+        except OSError:
+            return None
+    return total or None
+
+
+def _clock_for(args):
+    from .progress import _clock
+
+    return _clock
+
+
 def input_paths(args, warn) -> "list[Path | None]":
     if not args.files:
         return [None]
@@ -812,9 +851,18 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
     quiet = counting or args.summary
     need_matches = args.stats or args.summary or not (quiet or args.invert_match)
 
+    showing = args.progress == "always" or (
+        args.progress == "auto" and sys.stderr.isatty()
+    )
+
     replay: list[str] = []
     if args.tune:
-        matcher, _, replay = tune(matcher, paths, sys.stderr)
+        matcher, _, replay = tune(
+            matcher, paths, sys.stderr,
+            Progress(None, showing, clock=_clock_for(args)),
+        )
+
+    progress = Progress(_total_bytes(paths), showing, clock=_clock_for(args))
 
     printer = Printer(args, ink, out)
     fired: Counter = Counter()
@@ -841,7 +889,10 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
         count = 0
         try:
             for hit in search_stream(handle, matcher, label,
-                                     invert=args.invert_match, limit=args.max_count):
+                                     invert=args.invert_match,
+                                     limit=args.max_count,
+                                     need_matches=need_matches,
+                                     progress=progress):
                 count += 1
                 lines += 1
                 matched_any = True
@@ -867,6 +918,8 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
             out.write(f"{prefix}{count}\n")
         if args.files_without_match and count == 0:
             out.write(f"{ink.path(label)}\n")
+
+    progress.done()
 
     if args.sort:
         buffered.sort(key=lambda h: (

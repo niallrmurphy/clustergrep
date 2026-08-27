@@ -2,6 +2,15 @@
 
 ## 0.11.0
 
+- A progress report on stderr for slow searches: percentage, throughput and
+  an estimate when the input can be sized, throughput alone when it is a
+  pipe. Time-triggered rather than size-triggered, so a quick search stays
+  silent, and shown only at a terminal so pipelines and CI never see it.
+  `--progress always|never` overrides.
+- Fixed: the boolean fast path for `-c`, `-l` and `-v` was never actually
+  reached, so those modes had been collecting every match on a line when they
+  only needed to know whether one existed.
+
 - `--patterns --tune` tunes the pattern list against the corpus before
   emitting it, so the prefilter drops the noise too. Without it the filter
   keeps every line containing `run`, `break` or `miss` -- which on a corpus
