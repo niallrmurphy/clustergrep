@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "clustergrep"
+version = "0.1.0"
+description = "grep for a concept rather than a string, with the distance reported"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# WordNet is the default backend, so nltk is not optional -- an install where
+# the default does not work is not an install.
+dependencies = ["nltk>=3.8"]
+
+[project.optional-dependencies]
+vectors = ["numpy>=1.24"]
+dev = ["numpy>=1.24", "pytest>=7"]
+
+[project.scripts]
+clustergrep = "clustergrep.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clustergrep"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
