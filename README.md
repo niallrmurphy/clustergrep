@@ -36,7 +36,7 @@ Of course, this matching surrenders the previous boolean does/doesn't match
 approach, in favour of a notion of the _conceptual distance_ between the term
 you searched for and what was found. This means that we report lines that matched,
 and also the extent to which they matched. In the above, `0.25:jailbreak` says
-*this line matched because "jailbreak" is 0.25 away from "escape"*. You can tune
+*this line matched because "jailbreak" is 0.25 away from "escape"*. You can tweak
 `-t`, the flag that sets the conceptual/lexical distance until you're satisfied
 with the results.
 
@@ -324,24 +324,30 @@ the text holds `fled`, so lines are dropped silently. That is what
 
 At scale the polysemy problem stops being theoretical. Searching a 6GB corpus
 for `escape` returned 395,587 matches, of which `run`, `break` and `miss` were
-91%. All three are legitimate WordNet neighbours — `run` is a lemma of
-`scat.v.01`, *"flee; take to one's heels"* — and all three are useless here.
+91%. Different terms may be
+conceptually synonymous in a context, but be textually irrelevant elsewhere;
+`escape` can be used directly, or implied by `run` or `break`, but `run` can
+of course occur in non-escape contexts. Lowering `-t` doesn't help in all
+circumstances. However, we can systematically look at the distribution of the
+usage, and remove the lower fidelity occurrences.
 
-Lowering `-t` does not help: `miss` sits at 0.15, nearer than `jailbreak` at
-0.25. You would delete the signal and keep the noise.
-
-`--tune` removes them:
+`--tune` effectively does this:
 
 ```bash
 clustergrep -t 0.25 escape big.jsonl --summary --tune
 ```
 
 ```
-clustergrep: --tune dropped 3 term(s), cutting at a 12x jump in how often they fire versus the query:
-  run                     196055    9.5x
-  break                    95601    4.6x
-  miss                     70170    3.4x
+clustergrep: --tune dropped 3 term(s), cutting at a 11x jump in how often they fire versus the query:
+  run                        976    8.9x
+  break                      515    4.7x
+  miss                       340    3.1x
   re-run without --tune to keep them
+319 line(s) matched, 319 match(es), 4 of 37 cluster term(s) fired
+  0.00  escape     206
+  0.15  flight     59
+  0.20  flee       44
+  0.25  jailbreak  10
 ```
 
 It samples the corpus, counts how often each cluster term fires relative to
@@ -349,19 +355,15 @@ the query word itself, and cuts at the largest jump in that ratio. The
 reasoning is that a term appearing ten times more often than the word you
 actually searched for is not being used in your sense of it.
 
-The cut is made at the jump rather than at a fixed threshold because no fixed
-threshold survives a second corpus: measured on two, the noise sat at 9.5x and
-80x while the nearest genuine term sat at 0.29x and 2.1x — any constant
-separating one pair nearly misclassifies the other, while the jump itself is
-11.8x and 38x. The corpus is asked where its own boundary lies.
+The cut is made at the jump rather than at a fixed threshold because corpora
+vary, and any constant is unlikely to be relevant across both.
 
-It declines to act rather than guess when the query is too rare in the sample
+The flag does nothing rather than guess when the query is too rare in the sample
 to measure against, or when there is no clear separation, and it never drops a
 term firing less often than the query. **It always says what it did, on
-stderr.** A search tool that quietly discards terms would be worse than one
-that finds too much.
+stderr.** It does not silently discard terms.
 
-It is a heuristic, and it has a real failure mode: search for `automobile` in
+Of course, this is a heuristic, and as such can fail or have edge cases: search for `automobile` in
 a corpus that says `car`, and `car` looks exactly like `run` does. That is what
 the stderr report is for — if it drops something you wanted, drop `--tune` and
 pin a thesaurus instead.
