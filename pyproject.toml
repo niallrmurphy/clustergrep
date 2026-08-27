@@ -4,11 +4,25 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clustergrep"
-version = "0.1.0"
+dynamic = ["version"]
 description = "grep for a concept rather than a string, with the distance reported"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "Niall Richard Murphy" }]
+keywords = ["grep", "search", "semantic", "wordnet", "nlp", "cli", "logs"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Text Processing :: Indexing",
+  "Topic :: Utilities",
+]
 # WordNet is the default backend, so nltk is not optional -- an install where
 # the default does not work is not an install.
 dependencies = ["nltk>=3.8"]
@@ -17,8 +31,16 @@ dependencies = ["nltk>=3.8"]
 vectors = ["numpy>=1.24"]
 dev = ["numpy>=1.24", "pytest>=7"]
 
+[project.urls]
+Homepage = "https://github.com/niallrmurphy/clustergrep"
+Repository = "https://github.com/niallrmurphy/clustergrep"
+Issues = "https://github.com/niallrmurphy/clustergrep/issues"
+
 [project.scripts]
 clustergrep = "clustergrep.cli:main"
+
+[tool.hatch.version]
+path = "src/clustergrep/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/clustergrep"]

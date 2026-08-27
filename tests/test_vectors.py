@@ -9,7 +9,7 @@ from clustergrep.vectors import VectorBackend, _cache_path
 @pytest.fixture
 def model(tmp_path, monkeypatch):
     """A toy space with two clearly separated neighbourhoods."""
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("CLUSTERGREP_CACHE", str(tmp_path / "cache"))
     groups = {
         "escape": 0, "jail": 0, "breakout": 0, "flee": 0,
         "coolant": 1, "reactor": 1, "valve": 1,
@@ -79,7 +79,7 @@ def test_a_corrupt_cache_falls_back_to_the_model(model):
 
 
 def test_ragged_rows_are_rejected(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("CLUSTERGREP_CACHE", str(tmp_path / "cache"))
     path = tmp_path / "bad.vec"
     path.write_text("a 1.0 2.0 3.0\nb 1.0 2.0\n")
     with pytest.raises(BackendError) as exc:

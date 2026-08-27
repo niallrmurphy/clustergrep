@@ -38,8 +38,44 @@ the cluster does not have to enumerate them.
 ## Install
 
 ```bash
+pip install clustergrep
+clustergrep --install-data      # once: fetches the WordNet corpus
+```
+
+**The corpus is not bundled.** WordNet is about 10MB and carries Princeton's
+own licence, so clustergrep downloads it on request into a per-user directory
+rather than shipping a copy. If you already have it — from a previous `nltk`
+install, a system package, or `NLTK_DATA` — that copy is found first and
+nothing is downloaded.
+
+|            | data                                   | cache                                |
+|------------|----------------------------------------|--------------------------------------|
+| Linux      | `~/.local/share/clustergrep`           | `~/.cache/clustergrep`               |
+| macOS      | `~/Library/Application Support/clustergrep` | `~/Library/Caches/clustergrep`  |
+| Windows    | `%LOCALAPPDATA%\clustergrep\Data`       | `%LOCALAPPDATA%\clustergrep\Cache`   |
+
+`XDG_DATA_HOME` and `XDG_CACHE_HOME` are honoured wherever they are set, and
+`CLUSTERGREP_DATA` / `CLUSTERGREP_CACHE` override everything — necessary for
+containers, CI, and read-only home directories.
+
+```console
+$ clustergrep --paths
+data     /home/you/.local/share/clustergrep
+cache    /home/you/.cache/clustergrep
+wordnet  /home/you/.local/share/clustergrep/corpora/wordnet.zip
+```
+
+Uninstalling is `pip uninstall clustergrep` and deleting those two
+directories. Nothing else is written. The cache holds only files clustergrep
+can rebuild, so deleting it alone is always safe.
+
+### From source
+
+```bash
+git clone https://github.com/niallrmurphy/clustergrep
+cd clustergrep
 uv pip install -e '.[dev]'
-clustergrep --install-data     # one-time, ~10MB WordNet corpus
+uv run pytest -q
 ```
 
 ## Distance
@@ -207,8 +243,9 @@ backends get regular suffix rules only; spell irregulars out in the TSV.
 and it is the price of the extra columns. For a hot loop over gigabytes, use
 `--explain` to generate the alternation and hand it to real grep.
 
-## Tests
+## Licence
 
-```bash
-uv run pytest -q
-```
+clustergrep is MIT licensed. The WordNet corpus it downloads is **not** part of
+this distribution and is covered by [Princeton's WordNet
+licence](https://wordnet.princeton.edu/license-and-commercial-use). Any vector
+model you point `--model` at carries whatever licence its publisher gave it.

@@ -139,7 +139,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="colourise output (default auto)")
 
     p.add_argument("--install-data", action="store_true",
-                   help="download the WordNet corpus, then exit")
+                   help="download the WordNet corpus (~10MB, once), then exit")
+    p.add_argument("--paths", action="store_true",
+                   help="show where downloaded data and caches live, then exit")
     p.add_argument("--version", action="version", version=f"clustergrep {__version__}")
     return p
 
@@ -379,10 +381,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     out, err = sys.stdout, sys.stderr
 
+    if args.paths:
+        from .paths import describe
+
+        out.write(describe())
+        return EXIT_MATCH
     if args.install_data:
         from .wordnet import install_data
 
-        return EXIT_MATCH if install_data() else EXIT_ERROR
+        ok, message = install_data()
+        (out if ok else err).write(message + "\n")
+        return EXIT_MATCH if ok else EXIT_ERROR
     if args.word is None:
         parser.error("a word to search for is required")
     if not 0.0 <= args.threshold <= 1.0:

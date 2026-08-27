@@ -193,3 +193,16 @@ def test_wordnet_end_to_end(capsys, corpus):
         pytest.skip(err)
     assert "breakout" in out
     assert "flee" in out  # via the irregular form "fled"
+
+
+def test_paths_reports_where_data_lives(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLUSTERGREP_DATA", str(tmp_path / "d"))
+    monkeypatch.setenv("CLUSTERGREP_CACHE", str(tmp_path / "c"))
+    code, out, _ = run(capsys, "--paths")
+    assert code == EXIT_MATCH
+    assert str(tmp_path / "d") in out and str(tmp_path / "c") in out
+
+
+def test_paths_needs_no_search_word(capsys):
+    """--paths and --install-data must work before anything is set up."""
+    assert run(capsys, "--paths")[0] == EXIT_MATCH

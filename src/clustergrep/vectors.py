@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .cluster import BackendError, Term, normalise
+from .paths import cache_dir
 
 # Without a cap a generous threshold over a 400k-word vocabulary returns tens
 # of thousands of terms, which is not a cluster, it is a dictionary.
@@ -155,14 +156,10 @@ def _cache_path(model: Path) -> Path:
 
     Parsing a 400k-word text model takes seconds every run; the .npz form
     loads in milliseconds. Keyed by absolute path so two models with the same
-    basename do not collide, and invalidated by mtime.
+    basename do not collide, and invalidated by mtime. Lives in the cache
+    directory, not the data directory, because it is always rebuildable.
     """
     digest = hashlib.sha256(str(model.resolve()).encode()).hexdigest()[:16]
     return cache_dir() / f"vectors-{model.stem}-{digest}.npz"
 
 
-def cache_dir() -> Path:
-    import os
-
-    root = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-    return Path(root) / "clustergrep"

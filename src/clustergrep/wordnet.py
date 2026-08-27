@@ -21,6 +21,7 @@ from functools import lru_cache
 from typing import Iterable, Iterator
 
 from .cluster import Backend, BackendError, Term
+from .paths import data_dir, ensure
 
 # Cost of traversing one edge of the given relation type.
 SYNONYM = 0.15      # another lemma of the same synset
@@ -50,19 +51,57 @@ _POS_ALIASES = {
 }
 
 
-def _load_wordnet():
+def _import_nltk():
     try:
-        from nltk.corpus import wordnet as wn
+        import nltk
     except ImportError as exc:  # pragma: no cover - depends on install
         raise BackendError(
             "the wordnet backend needs nltk",
-            remedy="pip install 'clustergrep[wordnet]'",
+            remedy="pip install clustergrep",
         ) from exc
+    return nltk
+
+
+def register_data_path() -> None:
+    """Make clustergrep's own data directory visible to nltk.
+
+    Appended rather than prepended, so that a corpus the user already has --
+    from a previous nltk install, a system package, or NLTK_DATA -- is found
+    first and never downloaded a second time. clustergrep only supplies a
+    location for people who have no WordNet at all.
+    """
+    nltk = _import_nltk()
+    location = str(data_dir())
+    if location not in nltk.data.path:
+        nltk.data.path.append(location)
+
+
+def corpus_location() -> str | None:
+    """Where WordNet was found, or None. Never raises."""
+    try:
+        nltk = _import_nltk()
+        register_data_path()
+    except BackendError:
+        return None
+    # A zip-installed corpus does not answer to "corpora/wordnet", so probe
+    # for both the unpacked directory and the archive.
+    for probe in ("corpora/wordnet", "corpora/wordnet.zip"):
+        try:
+            return str(nltk.data.find(probe))
+        except LookupError:
+            continue
+    return None
+
+
+def _load_wordnet():
+    register_data_path()
+    from nltk.corpus import wordnet as wn
+
     try:
         wn.synsets("test")
     except LookupError as exc:
         raise BackendError(
-            "the WordNet corpus is not downloaded",
+            "the WordNet corpus is not installed (about 10MB, downloaded once)",
             remedy="clustergrep --install-data",
         ) from exc
     return wn
@@ -261,6 +300,7 @@ def _irregular_forms() -> dict[str, tuple[str, ...]]:
     """
     import nltk
 
+    register_data_path()
     reverse: dict[str, set[str]] = {}
     for name in ("verb.exc", "noun.exc", "adj.exc", "adv.exc"):
         try:
@@ -280,8 +320,25 @@ def _irregular_forms() -> dict[str, tuple[str, ...]]:
     return {base: tuple(sorted(forms)) for base, forms in reverse.items()}
 
 
-def install_data() -> bool:
-    """Download the WordNet corpus. Returns True on success."""
-    import nltk
+def install_data(force: bool = False) -> tuple[bool, str]:
+    """Fetch the WordNet corpus into clustergrep's data directory.
 
-    return bool(nltk.download("wordnet"))
+    The corpus is not shipped in the distribution: it is roughly 10MB and
+    carries Princeton's own licence, so it is the user's to fetch and the
+    user's to delete. Returns (ok, message).
+    """
+    nltk = _import_nltk()
+    register_data_path()
+
+    existing = corpus_location()
+    if existing and not force:
+        return True, f"WordNet is already installed at {existing}"
+
+    target = ensure(data_dir())
+    if not nltk.download("wordnet", download_dir=str(target), quiet=True):
+        return False, (
+            f"could not download WordNet into {target}\n"
+            "check network access, or set CLUSTERGREP_DATA to a writable path"
+        )
+    found = corpus_location() or str(target)
+    return True, f"WordNet installed at {found}"
