@@ -96,6 +96,15 @@ class Matcher:
     def __len__(self) -> int:
         return len(self._lookup)
 
+    def surface_forms(self) -> list[str]:
+        """Every string this matcher would recognise, including inflections.
+
+        This is what a fast prefilter needs. The cluster alone is not enough:
+        it holds "flee", while the text holds "fled", and a filter built from
+        cluster terms would drop the line before clustergrep ever saw it.
+        """
+        return sorted(self._lookup)
+
     def finditer(self, line: str) -> Iterator[Match]:
         for m in self.pattern.finditer(line):
             term = self._lookup.get(_key(m.group(0)))

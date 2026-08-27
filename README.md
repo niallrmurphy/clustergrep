@@ -235,7 +235,9 @@ Particular to this tool:
 | `--senses` | list the word's WordNet senses, for `--sense` |
 | `--pos n\|v\|a\|r` | one part of speech only |
 | `--sense N` | pin one reading of the word |
-| `--stats` | which cluster terms actually fired |
+| `--summary` | report which terms fired and how often; print no lines |
+| `--stats` | the same report on stderr, alongside the normal results |
+| `--forms` | every surface form that would match, for use as a prefilter |
 | `--sort` | nearest matches first |
 | `--json` | one object per match |
 | `--no-inflect` | exact surface forms only |
@@ -258,6 +260,62 @@ $ clustergrep -t 0.4 escape incidents.log --stats -c
   0.15  break loose              1
 ```
 
+## Large files
+
+Two things go wrong when the corpus is measured in gigabytes and a single
+line is pages of text: printing matches is useless, and 6MB/s is too slow.
+
+`--summary` answers the first. It prints no lines at all — only which cluster
+terms fired and how often, ordered by distance, so you can read the shape of
+a search that would otherwise scroll for hours:
+
+```console
+$ clustergrep -t 0.25 escape big.jsonl --summary
+1370 line(s) matched, 1370 match(es), 5 of 40 cluster term(s) fired
+  0.00  escape        289
+  0.15  elude         279
+  0.20  flee          273
+  0.25  breakout      277
+  0.25  fly the coop  252
+```
+
+Ordering by distance rather than by count is deliberate: it reads as *how far
+did I reach, and what did that buy me*, which is the question `-t` exists to
+answer. `--summary --json` gives the same as one object. For the matches
+themselves without the pages of text around them, `--json -o` omits the line.
+
+`--forms` answers the second. It prints every string the matcher would
+recognise — inflections included — which is exactly what a fast tool needs to
+throw away the lines that cannot match:
+
+```bash
+clustergrep -t 0.25 escape --forms > forms.txt
+```
+
+```bash
+grep -Fw -f forms.txt big.jsonl | clustergrep -t 0.25 escape --summary
+```
+
+grep discards the 98% of lines with nothing in them, and clustergrep does the
+distance work on what survives. On a 300MB JSONL that is 52 seconds down to
+3, with byte-identical output. Use `rg -Fw -f` if you have ripgrep.
+
+The cluster alone will not do as a filter: it holds `flee`, while the text
+holds `fled`, so a filter built from `--explain` output silently drops lines.
+`--forms` exists precisely because that failure is invisible.
+
+If the interesting text is one field of a JSONL record, cut it out first and
+scan less:
+
+```bash
+jq -r '.text' big.jsonl | grep -Fw -f forms.txt | clustergrep -t 0.25 escape --summary
+```
+
+One caveat on all of these: `grep -F` matches literally, so a hyphenated
+multi-word term (`fly-the-coop`) survives the filter only in the spelling the
+form list gives. clustergrep itself accepts spaces, hyphens and underscores
+interchangeably, so the second pass is more permissive than the first.
+
 ## Known limits
 
 **Polysemy.** A cluster covers every sense of the word. At `-t 0.4`, "escape"
@@ -274,10 +332,10 @@ so they are available under the default backend. The vectors and thesaurus
 backends get regular suffix rules only: if you have a specific requirement,
 put them in the TSV.
 
-**Speed.** Roughly 8µs per line — about 5s for a 24MB, 300k-line file, against
-0.02s for `grep -E`. This is Python's regex engine over a large alternation
-and the extra columns. For now, if you need fast loops over lots of data, use 
-`--explain` to generate the alternation and hand it to real grep.
+**Speed.** Roughly 6MB/s. A 300MB file takes about 50 seconds, against 0.1s
+for `grep -E`. The cost is Python's regex engine over an alternation of a few
+hundred surface forms, and it is the price of the extra columns. See
+[Large files](#large-files) for the way round it.
 
 ## Licence
 

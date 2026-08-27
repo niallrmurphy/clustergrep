@@ -260,4 +260,4 @@ def test_unambiguous_abbreviations_work_as_they_do_in_grep(capsys, corpus, thesa
     """getopt_long accepts unique prefixes, so --stat means --stats."""
     code, _, err = cg(capsys, thesaurus, "-t", "0.3", "escape", "--stat", str(corpus))
     assert code == EXIT_MATCH
-    assert "match(es) from" in err
+    assert "cluster term(s) fired" in err

@@ -89,6 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --explain, emit thesaurus TSV to pin and edit")
     g.add_argument("--senses", action="store_true",
                    help="list the word's WordNet senses and exit")
+    g.add_argument("--forms", action="store_true",
+                   help="print every surface form that would match, one per "
+                        "line, and exit; feed to grep -Fw -f as a prefilter")
 
     g = p.add_argument_group("matching")
     case = g.add_mutually_exclusive_group()
@@ -134,7 +137,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--json", action="store_true",
                    help="emit one JSON object per match")
     g.add_argument("--stats", action="store_true",
-                   help="after searching, report which terms actually fired")
+                   help="alongside the results, report on stderr which terms fired")
+    g.add_argument("--summary", action="store_true",
+                   help="report only which terms fired and how often; print no lines")
     g.add_argument("--color", choices=("auto", "always", "never"), default="auto",
                    help="colourise output (default auto)")
 
@@ -391,14 +396,19 @@ class Printer:
     def emit(self, hit: LineHit) -> None:
         if self.args.json:
             for m in hit.matches or [None]:
-                self.out.write(json.dumps({
+                record = {
                     "file": hit.path,
                     "line": hit.lineno,
                     "distance": None if m is None else round(m.distance, 4),
                     "term": None if m is None else m.term.text,
                     "matched": None if m is None else m.text,
-                    "text": hit.line,
-                }) + "\n")
+                }
+                # -o means "only what matched". On a corpus where one line is
+                # pages of text, echoing the line back is the difference
+                # between a usable stream and an unreadable one.
+                if not self.args.only_matching:
+                    record["text"] = hit.line
+                self.out.write(json.dumps(record) + "\n")
             return
         if self.args.only_matching:
             for m in sorted(hit.matches, key=lambda m: m.start):
@@ -418,6 +428,43 @@ def render_explain(cluster: Cluster, ink: Ink, out: TextIO) -> None:
         if term.via and term.via != "query":
             line += f"  {ink.dim(term.via)}"
         out.write(line.rstrip() + "\n")
+
+
+def render_summary(matcher, fired, lines: int, out: TextIO, ink: Ink,
+                   as_json: bool) -> None:
+    """How many lines matched, and which cluster terms were responsible.
+
+    Ordered by distance rather than by count, so the report reads as "how far
+    did I have to reach, and what did that buy me" -- the question a threshold
+    is chosen to answer. On a corpus whose lines are pages long, this is the
+    only output that fits on a screen.
+    """
+    distances = matcher.cluster.distances()
+    rows = sorted(fired.items(), key=lambda kv: (distances.get(kv[0], 1.0), kv[0]))
+
+    if as_json:
+        out.write(json.dumps({
+            "query": matcher.cluster.query,
+            "backend": matcher.cluster.backend,
+            "threshold": matcher.cluster.threshold,
+            "lines_matched": lines,
+            "matches": sum(fired.values()),
+            "cluster_terms": len(matcher.cluster.terms),
+            "terms_fired": len(fired),
+            "terms": [
+                {"term": t, "distance": distances.get(t), "count": n} for t, n in rows
+            ],
+        }) + "\n")
+        return
+
+    out.write(
+        f"{lines} line(s) matched, {sum(fired.values())} match(es), "
+        f"{len(fired)} of {len(matcher.cluster.terms)} cluster term(s) fired\n"
+    )
+    width = max((len(t) for t, _ in rows), default=0)
+    for term, n in rows:
+        d = distances.get(term, float("nan"))
+        out.write(f"  {ink.distance(d, f'{d:.2f}')}  {term:<{width}}  {n}\n")
 
 
 def render_senses(backend, word: str, out: TextIO) -> int:
@@ -533,6 +580,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         word_variants=getattr(backend, "word_variants", None),
     )
 
+    if args.forms:
+        out.write("".join(f"{form}\n" for form in matcher.surface_forms()))
+        return EXIT_MATCH
+
     return run_search(args, matcher, ink, out, warn)
 
 
@@ -550,12 +601,15 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn) -> int:
     if args.filename is None:
         args.filename = len(paths) > 1 or args.recursive
 
-    # --stats is a claim about which terms fired, so it forces the slow path.
-    summarising = args.count or args.files_with_matches or args.files_without_match
-    need_matches = args.stats or not (summarising or args.invert_match)
+    # Both --stats and --summary are claims about which terms fired, so they
+    # force the slow path that collects every match rather than the first.
+    counting = args.count or args.files_with_matches or args.files_without_match
+    quiet = counting or args.summary
+    need_matches = args.stats or args.summary or not (quiet or args.invert_match)
 
     printer = Printer(args, ink, out)
     fired: Counter = Counter()
+    lines = 0
     matched_any = False
     buffered: list[LineHit] = []
 
@@ -577,10 +631,11 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn) -> int:
             for hit in search_stream(handle, matcher, label,
                                      invert=args.invert_match, limit=args.max_count):
                 count += 1
+                lines += 1
                 matched_any = True
                 for m in hit.matches:
                     fired[m.term.text] += 1
-                if summarising:
+                if quiet:
                     if args.files_with_matches:
                         out.write(f"{ink.path(label)}\n")
                         break
@@ -607,13 +662,13 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn) -> int:
         for hit in buffered:
             printer.emit(hit)
 
-    if args.stats:
-        sys.stderr.write(f"\n{sum(fired.values())} match(es) from "
-                         f"{len(fired)} of {len(matcher.cluster.terms)} cluster term(s)\n")
-        distances = matcher.cluster.distances()
-        for term, n in fired.most_common():
-            sys.stderr.write(f"  {distances.get(term, float('nan')):.2f}  "
-                             f"{term:<24} {n}\n")
+    if args.summary:
+        # The report is the output here, so it goes to stdout where a pipe
+        # can reach it -- unlike --stats, which annotates a normal run and
+        # must stay on stderr to keep from polluting the results.
+        render_summary(matcher, fired, lines, out, ink, as_json=args.json)
+    elif args.stats:
+        render_summary(matcher, fired, lines, sys.stderr, ink, as_json=False)
 
     return EXIT_MATCH if matched_any else EXIT_NO_MATCH
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0
+
+- `--summary` reports which cluster terms fired and how often, ordered by
+  distance, and prints no lines. For a corpus whose lines are pages of text,
+  this is the only output that fits on a screen. `--summary --json` gives the
+  same as one object.
+- `--forms` prints every surface form the matcher would recognise, inflections
+  included, for use as a prefilter: `grep -Fw -f forms.txt big.jsonl |
+  clustergrep ... --summary` is roughly 16x faster than scanning directly and
+  produces identical output. A filter built from `--explain` instead would
+  silently drop lines containing `fled` while searching for `flee`.
+- `--json -o` no longer echoes the whole line back, only what matched.
+
 ## 0.8.1
 
 - The first search now offers to download the WordNet corpus, so installing
