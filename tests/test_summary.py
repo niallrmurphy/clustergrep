@@ -1,4 +1,4 @@
-"""--summary and --forms exist for corpora whose lines are too big to print:
+"""--summary and --patterns exist for corpora whose lines are too big to print:
 one line of a 6GB JSONL can be pages of text, so the useful output is a
 report about the search rather than the text that matched."""
 
@@ -80,27 +80,27 @@ def test_summary_reports_a_search_that_found_nothing(capsys, files):
     assert "0 line(s) matched" in out
 
 
-def test_forms_include_inflections_the_cluster_does_not_hold(capsys, files):
-    """The whole point of --forms: a prefilter built from cluster terms alone
+def test_patterns_include_inflections_the_cluster_does_not_hold(capsys, files):
+    """The whole point of --patterns: a prefilter built from cluster terms alone
     would drop the line containing "fleeing" before clustergrep ever saw it."""
-    _, out, _ = cg(capsys, files, "-t", "0.4", "escape", "--forms")
+    _, out, _ = cg(capsys, files, "-t", "0.4", "escape", "--patterns")
     forms = set(out.split())
     assert {"flee", "breakout", "escape"} <= forms
     assert "fleeing" in forms and "escaped" in forms
 
 
-def test_forms_searches_nothing(capsys, files):
+def test_patterns_searches_nothing(capsys, files):
     _, out, _ = cg(capsys, files, "-t", "0.4", "escape", str(files / "c.log"),
-                   "--forms")
+                   "--patterns")
     assert "prisoner" not in out
 
 
-def test_a_prefilter_built_from_forms_loses_no_matches(capsys, files, tmp_path):
+def test_a_prefilter_built_from_patterns_loses_no_matches(capsys, files, tmp_path):
     """The property the whole recipe rests on: filtering the corpus down to
-    lines containing a surface form must not change the answer."""
+    lines containing a pattern must not change the answer."""
     corpus = files / "c.log"
-    _, forms, _ = cg(capsys, files, "-t", "0.4", "escape", "--forms")
-    wanted = set(forms.split("\n")) - {""}
+    _, patterns, _ = cg(capsys, files, "-t", "0.4", "escape", "--patterns")
+    wanted = set(patterns.split("\n")) - {""}
 
     survivors = tmp_path / "survivors.log"
     kept = [

@@ -1,6 +1,6 @@
 """Turning a cluster into something that can be run against a line of text.
 
-Matching is a plain compiled regex over an alternation of every surface form
+Matching is a plain compiled regex over an alternation of every pattern
 in the cluster. That is deliberate: once the cluster has been decided, finding
 it is ordinary, fast, predictable string matching with no model in the loop.
 Everything uncertain about clustergrep is confined to building the cluster,
@@ -37,7 +37,7 @@ class Match:
 
 
 class Matcher:
-    """Searches lines for any surface form of a cluster."""
+    """Searches lines for any pattern belonging to a cluster."""
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class Matcher:
         self.inflect = inflect
         self.ignore_case = ignore_case
 
-        # Every surface form we will accept, mapped back to the term that
+        # Every pattern we will accept, mapped back to the term that
         # justifies it. On collision the nearest term wins, so a word that is
         # both a synonym and a distant inflection reports the flattering
         # distance rather than the punishing one.
@@ -68,7 +68,7 @@ class Matcher:
                 if held is None or term.distance < held.distance:
                     self._lookup[form] = term
 
-        # Every surface form the lexicon gave us is lower case, so under
+        # Every pattern the lexicon gave us is lower case, so under
         # --case-sensitive a query typed as "Guards" would compile to /guards/
         # and match nothing. The user's own capitalisation is theirs to keep,
         # so it goes in as an extra pattern; attribution still happens through
@@ -91,22 +91,26 @@ class Matcher:
         # \b would misbehave for forms that begin or end with punctuation;
         # these lookarounds mean the same thing for words and stay correct.
         flags = re.IGNORECASE if ignore_case else 0
-        self.pattern = re.compile(rf"(?<!\w)(?:{body})(?!\w)", flags)
+        self.regex = re.compile(rf"(?<!\w)(?:{body})(?!\w)", flags)
 
     def __len__(self) -> int:
         return len(self._lookup)
 
-    def surface_forms(self) -> list[str]:
+    def patterns(self) -> list[str]:
         """Every string this matcher would recognise, including inflections.
 
-        This is what a fast prefilter needs. The cluster alone is not enough:
-        it holds "flee", while the text holds "fled", and a filter built from
-        cluster terms would drop the line before clustergrep ever saw it.
+        This is what a fast prefilter needs, and what --patterns prints. The
+        cluster alone is not enough: it holds "flee", while the text holds
+        "fled", and a filter built from cluster terms would drop the line
+        before clustergrep ever saw it.
+
+        Note the singular ``self.regex`` is the compiled alternation built
+        from these; this returns the literal strings that went into it.
         """
         return sorted(self._lookup)
 
     def finditer(self, line: str) -> Iterator[Match]:
-        for m in self.pattern.finditer(line):
+        for m in self.regex.finditer(line):
             term = self._lookup.get(_key(m.group(0)))
             if term is None:  # pragma: no cover - every form is in the lookup
                 continue

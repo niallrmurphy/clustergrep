@@ -1,7 +1,7 @@
 """Core types shared by every cluster backend.
 
 A *cluster* is what clustergrep searches for in place of a fixed string: the
-query word plus the other surface forms that express roughly the same concept,
+query word plus the other patterns that express roughly the same concept,
 each carrying a distance in [0.0, 1.0].
 
 The distance contract, which every backend must honour:
@@ -28,7 +28,7 @@ EXACT = 0.0
 
 @dataclass(frozen=True, order=True)
 class Term:
-    """One surface form to search for, and how far it sits from the query."""
+    """One pattern to search for, and how far it sits from the query."""
 
     # Ordering is distance-first so that sorted() gives nearest-first.
     distance: float
@@ -62,7 +62,7 @@ class Cluster:
     ) -> "Cluster":
         """Normalise a backend's raw output into a cluster.
 
-        Deduplicates on surface form keeping the nearest distance, guarantees
+        Deduplicates on pattern keeping the nearest distance, guarantees
         the query itself is present at distance 0, sorts nearest-first, and
         applies the threshold and term cap.
         """

@@ -244,7 +244,7 @@ class WordNetBackend:
             yield s, MERONYM, "meronym"
 
     def word_variants(self, word: str) -> Iterable[str]:
-        """Irregular surface forms of a word: flee -> fled, break -> broke.
+        """Irregular forms of a word: flee -> fled, break -> broke.
 
         The matcher's suffix rules cannot derive these, and a concept search
         that misses "fled" while finding "flees" is not much of a concept

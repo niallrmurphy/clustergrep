@@ -6,8 +6,8 @@
   distance, and prints no lines. For a corpus whose lines are pages of text,
   this is the only output that fits on a screen. `--summary --json` gives the
   same as one object.
-- `--forms` prints every surface form the matcher would recognise, inflections
-  included, for use as a prefilter: `grep -Fw -f forms.txt big.jsonl |
+- `--patterns` prints every pattern the matcher would recognise, inflections
+  included, for use as a prefilter: `grep -Fw -f patterns.txt big.jsonl |
   clustergrep ... --summary` is roughly 16x faster than scanning directly and
   produces identical output. A filter built from `--explain` instead would
   silently drop lines containing `fled` while searching for `flee`.

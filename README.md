@@ -237,10 +237,10 @@ Particular to this tool:
 | `--sense N` | pin one reading of the word |
 | `--summary` | report which terms fired and how often; print no lines |
 | `--stats` | the same report on stderr, alongside the normal results |
-| `--forms` | every surface form that would match, for use as a prefilter |
+| `--patterns` | every pattern that would match, for use as a prefilter |
 | `--sort` | nearest matches first |
 | `--json` | one object per match |
-| `--no-inflect` | exact surface forms only |
+| `--no-inflect` | exact patterns only |
 | `--no-distance` | grep-shaped output |
 
 `--stats` is for tuning: 
@@ -280,40 +280,38 @@ $ clustergrep -t 0.25 escape big.jsonl --summary
 ```
 
 Ordering by distance rather than by count is deliberate: it reads as *how far
-did I reach, and what did that buy me*, which is the question `-t` exists to
-answer. `--summary --json` gives the same as one object. For the matches
-themselves without the pages of text around them, `--json -o` omits the line.
+did I reach, and what did that buy me* -- `-t` being how far, and the output
+being what you gained. `--summary --json` gives those results as one JSON object.
+For the matches themselves without the pages of text around them, `--json -o` omits the line.
 
-`--forms` answers the second. It prints every string the matcher would
+`--patterns` answers the second. It prints every string the matcher would
 recognise — inflections included — which is exactly what a fast tool needs to
 throw away the lines that cannot match:
 
 ```bash
-clustergrep -t 0.25 escape --forms > forms.txt
+clustergrep -t 0.25 escape --patterns > patterns.txt
 ```
 
 ```bash
-grep -Fw -f forms.txt big.jsonl | clustergrep -t 0.25 escape --summary
+grep -Fw -f patterns.txt big.jsonl | clustergrep -t 0.25 escape --summary
 ```
 
 grep discards the 98% of lines with nothing in them, and clustergrep does the
 distance work on what survives. On a 300MB JSONL that is 52 seconds down to
 3, with byte-identical output. Use `rg -Fw -f` if you have ripgrep.
-
-The cluster alone will not do as a filter: it holds `flee`, while the text
-holds `fled`, so a filter built from `--explain` output silently drops lines.
-`--forms` exists precisely because that failure is invisible.
+Unfortunately, you cannot use `--explain` output directly here because of inflections:
+use `--patterns` instead.
 
 If the interesting text is one field of a JSONL record, cut it out first and
 scan less:
 
 ```bash
-jq -r '.text' big.jsonl | grep -Fw -f forms.txt | clustergrep -t 0.25 escape --summary
+jq -r '.text' big.jsonl | grep -Fw -f patterns.txt | clustergrep -t 0.25 escape --summary
 ```
 
 One caveat on all of these: `grep -F` matches literally, so a hyphenated
-multi-word term (`fly-the-coop`) survives the filter only in the spelling the
-form list gives. clustergrep itself accepts spaces, hyphens and underscores
+multi-word term (e.g. `fly-the-coop`) will of course be treated literally. 
+clustergrep itself accepts spaces, hyphens and underscores
 interchangeably, so the second pass is more permissive than the first.
 
 ## Known limits
@@ -333,9 +331,9 @@ backends get regular suffix rules only: if you have a specific requirement,
 put them in the TSV.
 
 **Speed.** Roughly 6MB/s. A 300MB file takes about 50 seconds, against 0.1s
-for `grep -E`. The cost is Python's regex engine over an alternation of a few
-hundred surface forms, and it is the price of the extra columns. See
-[Large files](#large-files) for the way round it.
+for `grep -E`. This comes from Python's regex engine working over an alternation
+of a few hundred patterns, and is what produces the extra columns. See
+[Large files](#large-files) for a way around it.
 
 ## Licence
 

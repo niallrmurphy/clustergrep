@@ -28,7 +28,7 @@ def test_build_drops_terms_beyond_threshold():
     assert c.distances()["flee"] == 0.2
 
 
-def test_build_keeps_the_nearest_of_duplicate_surface_forms():
+def test_build_keeps_the_nearest_of_duplicate_patterns():
     c = Cluster.build(
         "escape", "test", [Term(0.4, "flee"), Term(0.2, "FLEE"), Term(0.6, "flee")], 0.9
     )

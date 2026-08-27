@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     inf.add_argument("--inflect", dest="inflect", action="store_true", default=True,
                      help="also match inflections: escaped, fled (the default)")
     inf.add_argument("--no-inflect", dest="inflect", action="store_false",
-                     help="match only the exact surface forms in the cluster")
+                     help="match only the exact patterns in the cluster")
 
     g = p.add_argument_group("inspect the cluster instead of searching")
     g.add_argument("--explain", action="store_true",
@@ -89,9 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --explain, emit thesaurus TSV to pin and edit")
     g.add_argument("--senses", action="store_true",
                    help="list the word's WordNet senses and exit")
-    g.add_argument("--forms", action="store_true",
-                   help="print every surface form that would match, one per "
-                        "line, and exit; feed to grep -Fw -f as a prefilter")
+    g.add_argument("--patterns", action="store_true",
+                   help="print every pattern that would match, one per line, "
+                        "and exit; feed to grep -Fw -f as a prefilter")
 
     g = p.add_argument_group("matching")
     case = g.add_mutually_exclusive_group()
@@ -305,7 +305,7 @@ def search_stream(
     counting and file-listing modes only need the second question answered,
     and on a large file that is most of the work.
     """
-    probe = matcher.pattern.search
+    probe = matcher.regex.search
     found = 0
     for lineno, raw in enumerate(stream, 1):
         line = raw.rstrip("\n").rstrip("\r")
@@ -580,8 +580,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         word_variants=getattr(backend, "word_variants", None),
     )
 
-    if args.forms:
-        out.write("".join(f"{form}\n" for form in matcher.surface_forms()))
+    if args.patterns:
+        out.write("".join(f"{pattern}\n" for pattern in matcher.patterns()))
         return EXIT_MATCH
 
     return run_search(args, matcher, ink, out, warn)
