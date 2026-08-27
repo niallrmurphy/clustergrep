@@ -44,7 +44,8 @@ Note "fled" and "broke loose": clustergrep matches irregular inflections, so
 the cluster does not have to enumerate them.
 
 At the moment clustergrep does not handle non-English, but this is very definitely
-an ambition.
+an ambition. (Technically, the thesaurus is multi-language, but the inflection
+rules are not.)
 
 ## Install
 
@@ -111,12 +112,13 @@ $ grep -n -w -F Guards incidents.log            # identical output
 
 *Notable distinction from grep*: cluster matching is always word-oriented,
 like `grep -w`, because concepts are words, and root/syllabic tokenisation would
-result in undue implementation copmlexity right now.
+result in undue implementation complexity right now.
 
 ### Where the numbers come from
 
-The default backend walks WordNet as a weighted graph with costed vertices.
-Every distance is therefore a summed path, which `--explain` will show:
+The default backend walks WordNet as a weighted graph with costed edges,
+and a penalty per "sense".  Every distance is therefore a summed path,
+which `--explain` will show:
 
 ```console
 $ clustergrep --explain -t 0.2 escape
@@ -169,12 +171,14 @@ lexically bound, so "escape" and "jail" have no plausible path.
 text export "knows" that `escape → jail` immediately but isn't comparably
 enumerable as a path from an accessible graph search.
 
-**thesaurus** is a patch file you can use to add your own terms:
+**thesaurus** is a patch file you can use to add your own terms (but
+_replaces_ WordNet rather than augments it, so you need to seed from the
+original):
 
 ```
 # concept   term          distance   note
 escape      jailbreak     0.25
-escape      exfil         0.30       our term for it
+escape      exfil         0.30       our term
 ```
 
 ```bash
@@ -240,7 +244,7 @@ put them in the TSV.
 
 **Speed.** Roughly 8µs per line — about 5s for a 24MB, 300k-line file, against
 0.02s for `grep -E`. This is Python's regex engine over a large alternation
-the extra columns. For now, if you need fast loops over lots of data, use 
+and the extra columns. For now, if you need fast loops over lots of data, use 
 `--explain` to generate the alternation and hand it to real grep.
 
 ## Licence
