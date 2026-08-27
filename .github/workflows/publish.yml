@@ -1,0 +1,40 @@
+name: publish
+
+# Fires only when you publish a GitHub Release, so nothing reaches PyPI
+# without a deliberate act. A PyPI version can be yanked but never replaced,
+# so the tests run again here rather than trusting that the push-time run of
+# the same commit is still representative.
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Required for trusted publishing: GitHub mints a short-lived OIDC token
+      # that PyPI verifies against the publisher you configured. No long-lived
+      # API token is stored in this repository.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv pip install --system -e '.[dev]'
+
+      - name: Download the WordNet corpus
+        run: python -m clustergrep --install-data
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always

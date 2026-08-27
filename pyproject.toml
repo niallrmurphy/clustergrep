@@ -39,6 +39,16 @@ Issues = "https://github.com/niallrmurphy/clustergrep/issues"
 [project.scripts]
 clustergrep = "clustergrep.cli:main"
 
+# Named so that `uv publish --index testpypi` resolves. TestPyPI is a wholly
+# separate registry from PyPI: separate account, separate token, and uploads
+# to it are throwaway -- which is what makes it the right place to check how
+# the project page renders before spending a version number for real.
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
 [tool.hatch.version]
 path = "src/clustergrep/__init__.py"
 
