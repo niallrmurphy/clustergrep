@@ -14,6 +14,7 @@ First public release.
   edit and commit).
 - `--explain` prints the cluster before you trust it; `--tsv` writes it out as
   a thesaurus file; `--stats` reports which terms actually fired.
+- Options may appear anywhere among the file names, as they may in grep.
 - The WordNet corpus is downloaded on request with `--install-data`, never
   bundled. It lands in a per-user data directory — `%LOCALAPPDATA%` on Windows,
   `~/Library/Application Support` on macOS, `~/.local/share` elsewhere — and an

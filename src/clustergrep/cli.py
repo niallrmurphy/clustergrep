@@ -146,6 +146,37 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def parse_argv(parser: argparse.ArgumentParser, argv: Sequence[str] | None):
+    """Parse arguments, tolerating options interleaved with file names.
+
+    argparse matches positionals in contiguous runs, so an option sitting
+    between two of them splits the run and the second group has nothing left
+    to match:
+
+        clustergrep escape a.log --stats b.log
+
+    That fails on every Python version, and before 3.12 even a single option
+    between the word and one file is enough to break it. Since grep accepts
+    its options anywhere, so must this.
+
+    So positionals are recovered rather than matched: anything argparse could
+    not place is a file name, unless it looks like a flag, in which case it is
+    a typo and still deserves the usual error rather than being silently
+    searched for on disk.
+    """
+    args, extra = parser.parse_known_args(argv)
+    unknown = [a for a in extra if _looks_like_flag(a)]
+    if unknown:
+        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
+    args.files.extend(a for a in extra if not _looks_like_flag(a))
+    return args
+
+
+def _looks_like_flag(token: str) -> bool:
+    # A bare "-" is conventionally a file name (stdin), not an option.
+    return token.startswith("-") and token != "-"
+
+
 # ---------------------------------------------------------------- colour
 
 
@@ -378,7 +409,7 @@ def build_backend(args) -> Backend:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parse_argv(parser, argv)
     out, err = sys.stdout, sys.stderr
 
     if args.paths:

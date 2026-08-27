@@ -206,3 +206,58 @@ def test_paths_reports_where_data_lives(capsys, tmp_path, monkeypatch):
 def test_paths_needs_no_search_word(capsys):
     """--paths and --install-data must work before anything is set up."""
     assert run(capsys, "--paths")[0] == EXIT_MATCH
+
+
+# grep takes its options anywhere on the line, and so must this. Before Python
+# 3.12 a single option between the word and a file broke parsing; the last two
+# cases here broke on every version, including the one this was developed on.
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["escape", "CORPUS"],
+        ["escape", "--stats", "CORPUS"],
+        ["escape", "CORPUS", "--stats"],
+        ["--stats", "escape", "CORPUS"],
+        ["escape", "CORPUS", "--stats", "CORPUS"],
+        ["escape", "-t", "0.3", "CORPUS", "CORPUS"],
+        ["escape", "CORPUS", "-t", "0.3", "--sort", "CORPUS"],
+    ],
+)
+def test_options_may_appear_anywhere_among_the_file_names(
+    capsys, corpus, thesaurus, argv
+):
+    filled = [str(corpus) if a == "CORPUS" else a for a in argv]
+    code, out, err = cg(capsys, thesaurus, *filled)
+    assert code == EXIT_MATCH, err
+    assert "escaped" in out
+
+
+def test_every_file_named_is_actually_searched(capsys, tmp_path, thesaurus):
+    """The recovered positionals must not be quietly dropped."""
+    a = tmp_path / "a.log"
+    b = tmp_path / "b.log"
+    a.write_text("the prisoner escaped\n")
+    b.write_text("a breakout on B wing\n")
+    _, out, _ = cg(capsys, thesaurus, "-t", "0.3", "escape", str(a), "--sort", str(b))
+    assert "a.log" in out and "b.log" in out
+
+
+def test_a_mistyped_flag_is_still_an_error_not_a_file_name(capsys, corpus, thesaurus):
+    """Recovering stray positionals must not turn a typo into a file name."""
+    with pytest.raises(SystemExit) as exc:
+        cg(capsys, thesaurus, "-t", "0.3", "escape", "--nonsense", str(corpus))
+    assert exc.value.code == EXIT_ERROR
+    assert "unrecognized arguments: --nonsense" in capsys.readouterr().err
+
+
+def test_an_ambiguous_abbreviation_is_rejected(capsys, corpus, thesaurus):
+    with pytest.raises(SystemExit):
+        cg(capsys, thesaurus, "escape", "--sen", str(corpus))
+    assert "ambiguous option: --sen" in capsys.readouterr().err
+
+
+def test_unambiguous_abbreviations_work_as_they_do_in_grep(capsys, corpus, thesaurus):
+    """getopt_long accepts unique prefixes, so --stat means --stats."""
+    code, _, err = cg(capsys, thesaurus, "-t", "0.3", "escape", "--stat", str(corpus))
+    assert code == EXIT_MATCH
+    assert "match(es) from" in err
