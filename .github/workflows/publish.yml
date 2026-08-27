@@ -11,7 +11,12 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: pypi
+    # No `environment:` here, deliberately: the trusted publisher on PyPI was
+    # registered without one, and PyPI checks the environment claim only when
+    # the publisher names an environment to check it against. Declaring one
+    # here that PyPI does not know about buys nothing. To add the extra gate
+    # later, set the environment on both sides at once -- a mismatch fails the
+    # upload at the last step, after the build has already succeeded.
     permissions:
       # Required for trusted publishing: GitHub mints a short-lived OIDC token
       # that PyPI verifies against the publisher you configured. No long-lived
