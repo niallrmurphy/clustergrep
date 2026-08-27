@@ -2,6 +2,12 @@
 
 ## 0.11.0
 
+- `--explain --tsv` no longer writes a term count into the header. The file
+  exists to be edited, so the count was wrong as soon as anyone edited it.
+- Corrected the documented throughput to 4-6MB/s. The previous single figure
+  was measured on files already in the page cache; a first read of a large
+  file sits at the lower end.
+
 - Fixed: piping into `head`, or any reader that leaves early, produced a
   `BrokenPipeError` traceback and a second one while flushing at exit.
   A closed pipe now ends the run quietly with the conventional exit status,

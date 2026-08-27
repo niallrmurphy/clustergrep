@@ -101,10 +101,9 @@ def to_tsv(cluster: Cluster) -> str:
     """Render a cluster as a thesaurus file, ready to edit and pin."""
     out = io.StringIO()
     out.write(f"# clustergrep cluster for {cluster.query!r}\n")
-    out.write(
-        f"# backend={cluster.backend} threshold={cluster.threshold} "
-        f"terms={len(cluster.terms)}\n"
-    )
+    # No term count here: this file exists to be edited, so any count written
+    # now is wrong as soon as someone does what the documentation tells them.
+    out.write(f"# backend={cluster.backend} threshold={cluster.threshold}\n")
     out.write("# concept\tterm\tdistance\tnote\n")
     for term in cluster.terms:
         note = term.via.replace("\t", " ") if term.via else ""

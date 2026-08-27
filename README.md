@@ -419,10 +419,12 @@ where the cluster came from. They are lost only if the corpus is not
 installed; `clustergrep --paths` will tell you. `--no-inflect` switches off
 regular and irregular forms together.
 
-**Speed.** Roughly 6MB/s. A 300MB file takes about 50 seconds, against 0.1s
-for `grep -E`. This comes from Python's regex engine working over an alternation
-of a few hundred patterns, and is what produces the extra columns. See
-[Large files](#large-files) for a way around it.
+**Speed.** Between about 4 and 6MB/s, against 0.1s for `grep -E` on the same
+file. This comes from Python's regex engine working over an alternation of a
+few hundred patterns, and is what produces the extra columns. Expect the lower
+end on a first read of a large file and the upper end once it is in the page
+cache; line length and match density barely matter, and non-ASCII text costs
+a few percent. See [Large files](#large-files) for a way around it.
 
 ## Licence
 
