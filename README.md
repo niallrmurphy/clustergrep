@@ -193,6 +193,7 @@ with right now, and we are open to other suggestions.
 --backend wordnet      (default)  offline, explainable, English
 --backend vectors      --model glove.6B.100d.txt
 --backend thesaurus    --thesaurus terms.tsv
+--backend llm          --llm-model llama3.2
 ```
 
 **wordnet** just knows lexicographic relations: relatively precise, but only
@@ -218,6 +219,23 @@ clustergrep -b thesaurus --thesaurus escape.tsv escape incidents.log
 ```
 
 From then on the search is fully reproducible and a new term is a one-line diff.
+
+**llm** asks a locally running Ollama model for a bounded list of semantic
+alternatives. It classifies each term as equivalent (`0.15`), narrower (`0.25`),
+associated (`0.35`), broader (`0.40`), or contextual (`0.50`); clustergrep maps
+those labels to fixed distances. Selecting `--backend llm` always generates the
+full set of relation classes; `--threshold` then filters that completed expansion,
+just as it does for WordNet. This is a calibrated judgement, not a graph
+measurement: use `--explain -t 1` to review every suggestion and reason, then
+`--tsv` to pin a trusted result. It always stops when the model reports completion,
+a batch adds nothing new, or `--max-terms` (or the optional `--llm-max-variants`)
+is reached. Set `--llm-url` for a non-default local endpoint and `--llm-timeout`
+to bound an individual request.
+
+```bash
+ollama serve
+clustergrep --backend llm --llm-model llama3.2 --explain escape
+```
 
 ## Options
 

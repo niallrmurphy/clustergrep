@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         "0 matches only the word itself",
     )
     g.add_argument(
-        "-b", "--backend", choices=("wordnet", "vectors", "thesaurus"),
+        "-b", "--backend", choices=("wordnet", "vectors", "thesaurus", "llm"),
         default=os.environ.get("CLUSTERGREP_BACKEND", "wordnet"),
         help="where the cluster comes from (default wordnet)",
     )
@@ -78,6 +78,17 @@ def build_parser() -> argparse.ArgumentParser:
                    metavar="PATH", help="vector model for --backend vectors")
     g.add_argument("--thesaurus", default=os.environ.get("CLUSTERGREP_THESAURUS"),
                    metavar="PATH", help="TSV file for --backend thesaurus")
+    g.add_argument("--llm-model", default=os.environ.get("CLUSTERGREP_LLM_MODEL"),
+                   metavar="MODEL", help="local Ollama model for --backend llm")
+    g.add_argument("--llm-url", default=os.environ.get("CLUSTERGREP_LLM_URL"),
+                   metavar="URL", help="Ollama generate endpoint (default localhost:11434)")
+    g.add_argument("--llm-timeout", type=float,
+                   default=float(os.environ.get("CLUSTERGREP_LLM_TIMEOUT", "90")),
+                   metavar="SECONDS", help="local LLM request timeout (default 90)")
+    llm_limit = os.environ.get("CLUSTERGREP_LLM_MAX_VARIANTS")
+    g.add_argument("--llm-max-variants", type=int,
+                   default=int(llm_limit) if llm_limit else None,
+                   metavar="N", help="hard cap on LLM terms (default --max-terms)")
     g.add_argument("--pos", choices=("n", "v", "a", "r"),
                    help="restrict to one part of speech (noun/verb/adj/adverb)")
     g.add_argument("--sense", type=int, metavar="N",
@@ -711,6 +722,16 @@ def build_backend(args) -> Backend:
         from .thesaurus import ThesaurusBackend
 
         return ThesaurusBackend(args.thesaurus)
+
+    if args.backend == "llm":
+        from .llm import DEFAULT_URL, LLMBackend
+
+        return LLMBackend(
+            args.llm_model,
+            url=args.llm_url or DEFAULT_URL,
+            timeout=args.llm_timeout,
+            max_variants=args.llm_max_variants or args.max_terms,
+        )
 
     if not args.model:
         raise BackendError(
