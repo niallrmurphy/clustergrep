@@ -1,6 +1,6 @@
 # clustergrep
 
-grep for a concept rather than a string, with matches ordered by conceptual distance.
+grep for a concept rather than a string, with matches displayed with conceptual distance.
 
 `grep` is mostly used for fixed or moderately varying text that you can determine
 in advance: a fixed log line string (e.g. "reboot"), a well-formed timestamp,
