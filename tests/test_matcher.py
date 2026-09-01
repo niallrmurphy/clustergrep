@@ -16,6 +16,14 @@ def cluster(*terms, threshold=0.5, query="escape"):
         ("watch", {"watches", "watched", "watching"}),
         ("flee", {"flees", "fleeing"}),
         ("stop", {"stopped", "stopping"}),
+        ("panic", {"panics", "panicked", "panicking"}),
+        ("die", {"dies", "died", "dying"}),
+        ("tie", {"ties", "tied", "tying"}),
+        ("wolf", {"wolves"}),
+        ("knife", {"knives"}),
+        ("hero", {"heroes"}),
+        ("safe", {"safer", "safest"}),
+        ("fly", {"flew", "flown"}),
     ],
 )
 def test_inflection_covers_the_real_forms(word, expected):
@@ -32,6 +40,21 @@ def test_inflection_bends_a_phrase_at_either_end():
 def test_short_and_non_alphabetic_words_are_not_inflected():
     assert inflected("go") == set()
     assert inflected("v2") == set()
+
+
+def test_inflection_avoids_common_spurious_spellings():
+    forms = inflected("open")
+    assert "openned" not in forms
+    assert "openning" not in forms
+
+    forms = inflected("panic")
+    assert "paniced" not in forms
+    assert "panicing" not in forms
+    assert "panicced" not in forms
+    assert "paniccing" not in forms
+
+    forms = inflected("tie")
+    assert "tiing" not in forms
 
 
 def test_matches_an_inflected_form_at_its_terms_distance():
@@ -71,11 +94,8 @@ def test_best_is_the_nearest_match_not_the_first():
     assert m.best("leak then flee").term.text == "flee"
 
 
-def test_backend_variants_supply_irregular_forms():
-    m = Matcher(
-        cluster((0.15, "flee")),
-        word_variants=lambda w: ["fled"] if w == "flee" else [],
-    )
+def test_lexicon_supplies_irregular_forms():
+    m = Matcher(cluster((0.15, "flee")))
     assert m.best("they fled").term.text == "flee"
 
 

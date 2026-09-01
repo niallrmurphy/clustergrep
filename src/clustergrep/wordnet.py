@@ -17,7 +17,6 @@ Edge costs below are judgements, not measurements. They encode two claims:
 from __future__ import annotations
 
 import heapq
-from functools import lru_cache
 from typing import Iterable, Iterator
 
 from .cluster import Backend, BackendError, Term
@@ -283,59 +282,6 @@ def _round(cost: float) -> float:
 
 def _within(cost: float, threshold: float) -> bool:
     return cost <= threshold + _EPS
-
-
-def irregular_forms(word: str) -> tuple[str, ...]:
-    """Irregular inflections of a word: flee -> fled, break -> broke.
-
-    This is morphology, not semantics. Which spellings of a word exist is a
-    fact about English, not about where the cluster came from, so it applies
-    to every backend. Without that, a thesaurus you pinned by hand stops
-    matching "fled" while still matching "flees" -- and nothing tells you,
-    which is the worst way for a search tool to be wrong.
-
-    Returns () rather than raising when the corpus is absent: losing
-    irregulars costs recall but breaks nothing, and the vectors and thesaurus
-    backends must keep working without WordNet installed.
-    """
-    try:
-        table = _irregular_forms()
-    except Exception:
-        return ()
-    return table.get(word.replace("_", " ").lower(), ())
-
-
-@lru_cache(maxsize=1)
-def _irregular_forms() -> dict[str, tuple[str, ...]]:
-    """Reverse WordNet's exception lists into base form -> inflected forms.
-
-    The .exc files map the other way ("fled flee", one pair per line) because
-    they exist to answer "what is the lemma of this token"; we want the
-    opposite. Missing files are not fatal -- we simply lose irregulars.
-    """
-    import nltk
-
-    try:
-        register_data_path()
-    except BackendError:
-        return {}
-    reverse: dict[str, set[str]] = {}
-    for name in ("verb.exc", "noun.exc", "adj.exc", "adv.exc"):
-        try:
-            handle = nltk.data.find(f"corpora/wordnet/{name}")
-        except LookupError:
-            continue
-        with handle.open() as fh:
-            for raw in fh:
-                parts = raw.decode("utf-8", "replace").split()
-                if len(parts) < 2:
-                    continue
-                inflected, *bases = parts
-                for base in bases:
-                    reverse.setdefault(base.replace("_", " "), set()).add(
-                        inflected.replace("_", " ")
-                    )
-    return {base: tuple(sorted(forms)) for base, forms in reverse.items()}
 
 
 def install_data(force: bool = False) -> tuple[bool, str]:

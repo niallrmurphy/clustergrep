@@ -20,6 +20,7 @@ wheels = [
 name = "clustergrep"
 source = { editable = "." }
 dependencies = [
+    { name = "lemminflect" },
     { name = "nltk" },
 ]
 
@@ -38,6 +39,7 @@ vectors = [
 
 [package.metadata]
 requires-dist = [
+    { name = "lemminflect", specifier = ">=0.2.3" },
     { name = "nltk", specifier = ">=3.8" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.24" },
     { name = "numpy", marker = "extra == 'vectors'", specifier = ">=1.24" },
@@ -91,6 +93,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a50b2208a93dce981fe615b64d5a4d4abee421d898df/joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3", size = 331603, upload-time = "2025-12-15T08:41:46.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071, upload-time = "2025-12-15T08:41:44.973Z" },
+]
+
+[[package]]
+name = "lemminflect"
+version = "0.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2d/41/662a99c976acb78907e6423cb666f0001450c35f74362b402716378f45b1/lemminflect-0.2.3.tar.gz", hash = "sha256:5e125ab381b4156245a8c0b5bcdccb899950ead96546eb9735ea8641636a1af6", size = 765166, upload-time = "2022-10-02T20:54:08.478Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/98/9fac8cc177474ddd8d1725d5cae052098662d5e4a6756633335f4393673b/lemminflect-0.2.3-py3-none-any.whl", hash = "sha256:1cf470efa783733ca5654cc1a6ee1de774e59031e61bf6210467625e84a8cf1c", size = 769698, upload-time = "2022-10-02T20:54:05.584Z" },
 ]
 
 [[package]]

@@ -137,12 +137,6 @@ def test_a_pinned_thesaurus_still_matches_irregular_inflections(capsys, files):
     A hand-pinned cluster holding "flee" must still find "fled", or the file
     you pinned for reproducibility silently loses recall and nothing says so.
     """
-    pytest.importorskip("nltk")
-    from clustergrep.wordnet import irregular_forms
-
-    if not irregular_forms("flee"):
-        pytest.skip("WordNet corpus not installed")
-
     (files / "irr.log").write_text("two inmates fled the yard\n")
     code, out, _ = cg(capsys, files, "-t", "0.2", "escape", str(files / "irr.log"))
     assert code == EXIT_MATCH

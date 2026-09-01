@@ -410,14 +410,12 @@ this reason.
 **Distances are not probabilities** and are not comparable between backends.
 They only order matches within one search.
 
-**English only**, and only as current as WordNet 3.0.
+**English only**; semantic clusters are only as current as WordNet 3.0.
 
-**Irregular inflections** (`fled`, `broke`, `flew`) come from WordNet's
-exception lists and apply to every backend, including a thesaurus you pinned
-by hand — which spellings of a word exist is a fact about English, not about
-where the cluster came from. They are lost only if the corpus is not
-installed; `clustergrep --paths` will tell you. `--no-inflect` switches off
-regular and irregular forms together.
+**Inflections** (`escaped`, `fled`, `wolves`, `safer`) come from
+[LemmInflect](https://pypi.org/project/lemminflect/)'s English lexical data and
+apply to every backend, including a thesaurus you pinned by hand. `--no-inflect`
+switches them off together.
 
 **Speed.** Between about 4 and 6MB/s, against 0.1s for `grep -E` on the same
 file. This comes from Python's regex engine working over an alternation of a

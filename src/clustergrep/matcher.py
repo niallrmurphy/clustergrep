@@ -11,16 +11,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable, Iterable, Iterator
+
+from lemminflect import getAllInflections
 
 from .cluster import Cluster, Term
 
 # A space in a term may appear in text as a space, an underscore or a hyphen:
 # "fly the coop", "fly-the-coop" and "fly_the_coop" are the same match.
 _GAP = r"[\s_-]+"
-
-_VOWELS = "aeiou"
-
 
 @dataclass(frozen=True)
 class Match:
@@ -45,13 +45,10 @@ class Matcher:
         *,
         inflect: bool = True,
         ignore_case: bool = True,
-        word_variants: Callable[[str], Iterable[str]] | None = None,
     ) -> None:
         self.cluster = cluster
         self.inflect = inflect
         self.ignore_case = ignore_case
-        # Kept so a pruned copy can be rebuilt identically; see cli.tune.
-        self.word_variants = word_variants
 
         # Every pattern we will accept, mapped back to the term that
         # justifies it. On collision the nearest term wins, so a word that is
@@ -62,12 +59,6 @@ class Matcher:
             forms = {term.text}
             if inflect:
                 forms |= expand(term.text, _forms)
-                # Irregulars are the same job as the suffix rules above, just
-                # table-driven, so --no-inflect switches off both or neither.
-                if word_variants is not None:
-                    forms |= expand(
-                        term.text, lambda w: {_key(v) for v in word_variants(w)}
-                    )
             for form in forms:
                 form = _key(form)
                 held = self._lookup.get(form)
@@ -160,38 +151,20 @@ def expand(term: str, generator: Callable[[str], Iterable[str]]) -> set[str]:
 
 
 def inflected(term: str) -> set[str]:
-    """Regular English inflections of a term.
-
-    Suffix rules only, so this reaches escape/escapes/escaped/escaping and
-    stop/stopped/stopping but never flee/fled or run/ran. Irregular forms are
-    a lexicon rather than a rule, so they arrive from a backend's variants().
-    """
+    """English inflections of a term from LemmInflect's lexical data."""
     return expand(term, _forms)
 
 
-def _forms(word: str) -> set[str]:
+@lru_cache(maxsize=16_384)
+def _forms(word: str) -> frozenset[str]:
     if len(word) < 3 or not word.isalpha():
-        return set()
+        return frozenset()
 
-    out = {word + "s"}
-    if word.endswith("ee"):
-        # flee -> flees, fleeing; the silent-e rules below would give "fleing".
-        out |= {word + "ing", word + "d"}
-    elif word.endswith("e"):
-        out |= {word + "d", word[:-1] + "ing"}
-    elif word.endswith("y") and len(word) > 1 and word[-2] not in _VOWELS:
-        out -= {word + "s"}
-        out |= {word[:-1] + "ies", word[:-1] + "ied", word + "ing"}
-    elif word.endswith(("s", "x", "z", "ch", "sh")):
-        out -= {word + "s"}
-        out |= {word + "es", word + "ed", word + "ing"}
-    else:
-        out |= {word + "ed", word + "ing"}
-        # Consonant-vowel-consonant doubles the final letter: stop -> stopping.
-        if (
-            word[-1] not in _VOWELS + "wxy"
-            and word[-2] in _VOWELS
-            and word[-3] not in _VOWELS
-        ):
-            out |= {word + word[-1] + "ed", word + word[-1] + "ing"}
-    return out
+    # A cluster term is deliberately untagged: it can be a noun, verb,
+    # adjective, or more than one of these. Retain every lexical spelling
+    # LemmInflect knows for it rather than guessing its part of speech.
+    base = word.lower()
+    forms = getAllInflections(base)
+    return frozenset(
+        form for variants in forms.values() for form in variants if form != base
+    )

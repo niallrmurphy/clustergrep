@@ -107,14 +107,6 @@ def test_unknown_words_expand_to_themselves(backend):
     assert [t.text for t in expand(backend, "gxqzzy", 0.4).terms] == ["gxqzzy"]
 
 
-def test_irregular_forms_are_available(backend):
-    from clustergrep.wordnet import irregular_forms
-
-    assert "fled" in irregular_forms("flee")
-    assert "broke" in irregular_forms("break")
-    assert irregular_forms("gxqzzy") == ()
-
-
 def test_expansion_of_a_broad_word_stays_bounded(backend):
     """Descending from a near-universal abstraction would return the language."""
     assert len(expand(backend, "act", 0.5).terms) < 2000
