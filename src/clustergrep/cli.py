@@ -23,6 +23,7 @@ from typing import Iterable, Iterator, Sequence, TextIO
 from . import __version__
 from .cluster import Backend, BackendError, Cluster, normalise
 from .excerpt import excerpts
+from .findings import FindingClusterer
 from .progress import Progress
 from .matcher import Match, Matcher
 
@@ -40,6 +41,7 @@ DEFAULT_MAX_TERMS = 250
 # Wide enough to judge a match in context, narrow enough that a screenful of
 # them stays a screenful.
 DEFAULT_EXCERPT = 100
+_CLUSTER_CONTEXT = 400
 
 # Read this much of a file to decide whether it is text, as grep does.
 _SNIFF = 8192
@@ -95,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="use only WordNet sense N; see --senses")
     g.add_argument("--sense-penalty", type=float, default=None, metavar="D",
                    help="extra distance per less-common sense (default 0.05)")
+    g.add_argument(
+        "--context",
+        metavar="TEXT",
+        help="describe the intended usage to disambiguate WordNet or guide the LLM",
+    )
     g.add_argument("--antonyms", action="store_true",
                    help="include opposites in the cluster")
     g.add_argument("--max-terms", type=int, default=DEFAULT_MAX_TERMS, metavar="N",
@@ -174,6 +181,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "you searched for, and say on stderr which were dropped")
     g.add_argument("--summary", action="store_true",
                    help="report only which terms fired and how often; print no lines")
+    g.add_argument(
+        "--cluster-lines",
+        type=int,
+        metavar="N",
+        help="group matching lines into at most N themes and print one "
+        "representative per theme",
+    )
     g.add_argument("--color", choices=("auto", "always", "never"), default="auto",
                    help="colourise output (default auto)")
     g.add_argument("--progress", choices=("auto", "always", "never"),
@@ -468,6 +482,26 @@ class LineHit:
         return min(self.matches, key=lambda m: m.distance, default=None)
 
 
+def _semantic_facets(matches: Iterable[Match]) -> tuple[str, ...]:
+    """WordNet root senses already explain which semantic branch produced a term."""
+    facets = set()
+    for match in matches:
+        root = match.term.via.split(" -", 1)[0]
+        parts = root.rsplit(".", 2)
+        if len(parts) == 3 and parts[1] in {"n", "v", "a", "r", "s"} and parts[2].isdigit():
+            facets.add(root)
+    return tuple(sorted(facets))
+
+
+def _cluster_text(hit: LineHit) -> str:
+    windows = excerpts(
+        hit.line,
+        [(match.start, match.end) for match in hit.matches],
+        _CLUSTER_CONTEXT,
+    )
+    return " ".join(window.text for window in windows)
+
+
 def search_stream(
     stream: Iterable[str],
     matcher: Matcher,
@@ -575,28 +609,29 @@ class Printer:
         out.append(hit.line[cursor:])
         return "".join(out)
 
+    def record(self, hit: LineHit, match: Match | None) -> dict:
+        record = {
+            "file": hit.path,
+            "line": hit.lineno,
+            "distance": None if match is None else round(match.distance, 4),
+            "term": None if match is None else match.term.text,
+            "matched": None if match is None else match.text,
+        }
+        # On a corpus where one line is pages of text, echoing the line back
+        # is the difference between a usable stream and an unreadable one.
+        if self.args.excerpt and match is not None:
+            windows = excerpts(
+                hit.line, [(match.start, match.end)], self.args.excerpt
+            )
+            record["excerpt"] = windows[0].text if windows else ""
+        elif not self.args.only_matching:
+            record["text"] = hit.line
+        return record
+
     def emit(self, hit: LineHit) -> None:
         if self.args.json:
-            for m in hit.matches or [None]:
-                record = {
-                    "file": hit.path,
-                    "line": hit.lineno,
-                    "distance": None if m is None else round(m.distance, 4),
-                    "term": None if m is None else m.term.text,
-                    "matched": None if m is None else m.text,
-                }
-                # On a corpus where one line is pages of text, echoing the
-                # line back is the difference between a usable stream and an
-                # unreadable one. -o wants only the match; --excerpt wants it
-                # with enough context to judge.
-                if self.args.excerpt and m is not None:
-                    windows = excerpts(
-                        hit.line, [(m.start, m.end)], self.args.excerpt
-                    )
-                    record["excerpt"] = windows[0].text if windows else ""
-                elif not self.args.only_matching:
-                    record["text"] = hit.line
-                self.out.write(json.dumps(record) + "\n")
+            for match in hit.matches or [None]:
+                self.out.write(json.dumps(self.record(hit, match)) + "\n")
             return
         if self.args.only_matching:
             for m in sorted(hit.matches, key=lambda m: m.start):
@@ -688,6 +723,41 @@ def render_summary(matcher, fired, lines: int, out: TextIO, ink: Ink,
         out.write(f"  {ink.distance(d, f'{d:.2f}')}  {term:<{width}}  {n}\n")
 
 
+def render_finding_groups(groups, printer: Printer, out: TextIO) -> None:
+    """Print each lexical-context cluster and its most central matching line."""
+    if printer.args.json:
+        for number, group in enumerate(groups, 1):
+            representative = group.representative
+            out.write(json.dumps({
+                "cluster": number,
+                "lines": group.count,
+                "terms": [
+                    {"term": term, "lines": count}
+                    for term, count in group.terms
+                ],
+                "keywords": list(group.keywords),
+                "representative": printer.record(
+                    representative, representative.best
+                ),
+            }) + "\n")
+        return
+
+    out.write(
+        f"{len(groups)} cluster(s) from "
+        f"{sum(group.count for group in groups)} matching line(s)\n"
+    )
+    for number, group in enumerate(groups, 1):
+        terms = ", ".join(
+            f"{term} ({count})" for term, count in group.terms[:4]
+        )
+        context = ", ".join(group.keywords)
+        details = f"; terms: {terms}" if terms else ""
+        if context:
+            details += f"; context: {context}"
+        out.write(f"[{number}] {group.count} line(s){details}\n")
+        printer.emit(group.representative)
+
+
 def render_senses(backend, word: str, out: TextIO) -> int:
     senses = backend.describe_senses(word)
     if not senses:
@@ -712,6 +782,7 @@ def build_backend(args) -> Backend:
                 SENSE_PENALTY if args.sense_penalty is None else args.sense_penalty
             ),
             include_antonyms=args.antonyms,
+            context=args.context,
         )
     if args.backend == "thesaurus":
         if not args.thesaurus:
@@ -731,6 +802,7 @@ def build_backend(args) -> Backend:
             url=args.llm_url or DEFAULT_URL,
             timeout=args.llm_timeout,
             max_variants=args.llm_max_variants or args.max_terms,
+            context=args.context,
         )
 
     if not args.model:
@@ -808,6 +880,35 @@ def _run(argv: Sequence[str] | None = None) -> int:
         parser.error(f"--excerpt must be at least 1, got {args.excerpt}")
     if not 0.0 <= args.threshold <= 1.0:
         parser.error(f"--threshold must be between 0.0 and 1.0, got {args.threshold}")
+    if args.context and args.backend not in ("wordnet", "llm"):
+        parser.error("--context is only supported by the wordnet and llm backends")
+    if args.context and args.sense is not None:
+        parser.error("--context and --sense cannot be used together")
+    if args.cluster_lines is not None:
+        if args.cluster_lines < 1:
+            parser.error(
+                f"--cluster-lines must be at least 1, got {args.cluster_lines}"
+            )
+        incompatible = [
+            name
+            for name, enabled in (
+                ("--count", args.count),
+                ("--files-with-matches", args.files_with_matches),
+                ("--files-without-match", args.files_without_match),
+                ("--invert-match", args.invert_match),
+                ("--only-matching", args.only_matching),
+                ("--sort", args.sort),
+                ("--summary", args.summary),
+                ("--explain", args.explain),
+                ("--patterns", args.patterns),
+                ("--senses", args.senses),
+            )
+            if enabled
+        ]
+        if incompatible:
+            parser.error(
+                "--cluster-lines cannot be combined with " + incompatible[0]
+            )
 
     ink = Ink(args.color == "always" or (args.color == "auto" and out.isatty()))
 
@@ -911,7 +1012,12 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
     # force the slow path that collects every match rather than the first.
     counting = args.count or args.files_with_matches or args.files_without_match
     quiet = counting or args.summary
-    need_matches = args.stats or args.summary or not (quiet or args.invert_match)
+    need_matches = (
+        args.cluster_lines is not None
+        or args.stats
+        or args.summary
+        or not (quiet or args.invert_match)
+    )
 
     showing = args.progress == "always" or (
         args.progress == "auto" and sys.stderr.isatty()
@@ -927,6 +1033,11 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
     progress = Progress(_total_bytes(paths), showing, clock=_clock_for(args))
 
     printer = Printer(args, ink, out)
+    line_clusterer = (
+        FindingClusterer(args.cluster_lines, matcher.cluster.query)
+        if args.cluster_lines is not None
+        else None
+    )
     fired: Counter = Counter()
     lines = 0
     matched_any = False
@@ -960,6 +1071,18 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
                 matched_any = True
                 for m in hit.matches:
                     fired[m.term.text] += 1
+                if line_clusterer is not None:
+                    best = hit.best
+                    if best is not None:
+                        line_clusterer.add(
+                            hit,
+                            text=_cluster_text(hit),
+                            terms=(match.term.text for match in hit.matches),
+                            matched=(match.text for match in hit.matches),
+                            facets=_semantic_facets(hit.matches),
+                            distance=best.distance,
+                        )
+                    continue
                 if quiet:
                     if args.files_with_matches:
                         out.write(f"{ink.path(label)}\n")
@@ -983,7 +1106,9 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
 
     progress.done()
 
-    if args.sort:
+    if line_clusterer is not None:
+        render_finding_groups(line_clusterer.groups(), printer, out)
+    elif args.sort:
         buffered.sort(key=lambda h: (
             h.best.distance if h.best else 1.0, h.path, h.lineno))
         for hit in buffered:

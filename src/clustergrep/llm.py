@@ -69,6 +69,7 @@ class LLMBackend:
         url: str = DEFAULT_URL,
         timeout: float = DEFAULT_TIMEOUT,
         max_variants: int = DEFAULT_MAX_VARIANTS,
+        context: str | None = None,
     ) -> None:
         if not model:
             raise BackendError(
@@ -83,6 +84,7 @@ class LLMBackend:
         self.url = url
         self.timeout = timeout
         self.max_variants = max_variants
+        self.context = context
 
     def expand(self, word: str, threshold: float) -> Iterable[Term]:
         seen = {normalise(word)}
@@ -91,7 +93,9 @@ class LLMBackend:
             batch_size = min(BATCH_SIZE, remaining)
             payload = {
                 "model": self.model,
-                "prompt": _prompt(word, _RELATIONS, seen, batch_size),
+                "prompt": _prompt(
+                    word, _RELATIONS, seen, batch_size, context=self.context
+                ),
                 "format": _schema(batch_size),
                 "stream": False,
                 # This bounds one transport batch, not the cluster's size.
@@ -137,14 +141,26 @@ def _prompt(
     allowed: tuple[str, ...],
     seen: set[str],
     batch_size: int,
+    *,
+    context: str | None = None,
 ) -> str:
     query = json.dumps(word)
     prior = ", ".join(sorted(seen))
     labels = ", ".join(allowed)
-    return f"""Generate up to {batch_size} new English search terms related to {query}.
-Return a coverage-saturated batch: add a term only if it covers a distinct meaning or
-relationship not represented by the existing terms. Do not add spelling variants,
-inflections, phrases that merely contain the query, or near-duplicate compounds.
+    intended = (
+        "\nThe intended usage is "
+        + json.dumps(context)
+        + ". Exclude terms that fit only another sense."
+        if context
+        else ""
+    )
+    return f"""Generate up to {batch_size} new English search terms related to {query}.{intended}
+Return a coverage-saturated batch: cover established synonyms, narrower names, domain
+jargon, euphemisms and strong associations, but add a term only when it covers a distinct
+meaning or relationship not represented by the existing terms. Prefer specific terms
+likely to make a matching line relevant; omit polysemous common words whose unrelated
+uses would swamp useful results. Do not add spelling variants, inflections, phrases that
+merely contain the query, or near-duplicate compounds.
 Each item needs a term, one relation, and a reason of 12 words or fewer.
 Allowed relation labels: {labels}. Existing terms: {prior}.
 Set complete to true only when no further non-redundant terms in the allowed relation

@@ -125,6 +125,72 @@ def test_sort_puts_the_nearest_matches_first(capsys, corpus, thesaurus):
     assert distances == sorted(distances)
 
 
+def test_cluster_lines_groups_contexts_and_surfaces_one_representative(
+    capsys, tmp_path
+):
+    thesaurus = tmp_path / "themes.tsv"
+    thesaurus.write_text(
+        "escape\tjailbreak\t0.25\n"
+        "escape\tbreakout\t0.25\n"
+        "escape\tleakage\t0.30\n"
+        "escape\toutflow\t0.30\n"
+    )
+    corpus = tmp_path / "themes.log"
+    corpus.write_text(
+        "prisoner escaped through the laundry tunnel\n"
+        "prisoner made a jailbreak through the tunnel\n"
+        "guards found the prisoner near the tunnel after a breakout\n"
+        "coolant leakage reached the reactor valve\n"
+        "reactor coolant outflow reached the relief valve\n"
+    )
+
+    code, out, _ = cg(
+        capsys,
+        thesaurus,
+        "-t",
+        "0.3",
+        "escape",
+        corpus,
+        "--cluster-lines",
+        "4",
+    )
+
+    assert code == EXIT_MATCH
+    assert out.splitlines()[0] == "2 cluster(s) from 5 matching line(s)"
+    assert "[1] 3 line(s)" in out and "[2] 2 line(s)" in out
+    representatives = [
+        line for line in out.splitlines() if line.partition(":")[0].isdigit()
+    ]
+    assert len(representatives) == 2
+
+
+def test_cluster_lines_json_keeps_cluster_evidence(capsys, tmp_path):
+    thesaurus = tmp_path / "themes.tsv"
+    thesaurus.write_text("escape\tbreakout\t0.25\n")
+    corpus = tmp_path / "themes.log"
+    corpus.write_text(
+        "prisoner escaped through the tunnel\n"
+        "guards found a breakout near the tunnel\n"
+    )
+
+    _, out, _ = cg(
+        capsys,
+        thesaurus,
+        "-t",
+        "0.3",
+        "escape",
+        corpus,
+        "--cluster-lines",
+        "3",
+        "--json",
+    )
+    groups = [json.loads(line) for line in out.splitlines()]
+
+    assert sum(group["lines"] for group in groups) == 2
+    assert all(group["keywords"] for group in groups)
+    assert all("text" in group["representative"] for group in groups)
+
+
 def test_max_count_stops_early(capsys, corpus, thesaurus):
     _, out, _ = cg(capsys, thesaurus, "-t", "0.4", "-m", "2", "escape", corpus)
     assert len(out.splitlines()) == 2

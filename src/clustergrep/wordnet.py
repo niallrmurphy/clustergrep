@@ -17,6 +17,7 @@ Edge costs below are judgements, not measurements. They encode two claims:
 from __future__ import annotations
 
 import heapq
+import re
 from typing import Iterable, Iterator
 
 from .cluster import Backend, BackendError, Term
@@ -52,6 +53,12 @@ _POS_ALIASES = {
     "a": "a", "adj": "a", "adjective": "a",
     "r": "r", "adv": "r", "adverb": "r",
 }
+
+_CONTEXT_WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
+_CONTEXT_STOPWORDS = frozenset(
+    "a an and are as at be by for from in into is it of on or that the their "
+    "this to was were with".split()
+)
 
 
 def _import_nltk():
@@ -121,6 +128,7 @@ class WordNetBackend:
         sense: int | None = None,
         sense_penalty: float = SENSE_PENALTY,
         include_antonyms: bool = False,
+        context: str | None = None,
     ) -> None:
         if pos is not None:
             if pos not in _POS_ALIASES:
@@ -130,6 +138,7 @@ class WordNetBackend:
         self.sense = sense
         self.sense_penalty = sense_penalty
         self.include_antonyms = include_antonyms
+        self.context = context
         self._wn = None
 
     @property
@@ -138,10 +147,17 @@ class WordNetBackend:
             self._wn = _load_wordnet()
         return self._wn
 
-    def senses(self, word: str) -> list:
-        """The synsets this backend would start from, in WordNet's own order."""
+    def _available_senses(self, word: str) -> list:
         lemma = word.replace(" ", "_").lower()
-        found = self.wn.synsets(lemma, pos=self.pos) if self.pos else self.wn.synsets(lemma)
+        return (
+            self.wn.synsets(lemma, pos=self.pos)
+            if self.pos
+            else self.wn.synsets(lemma)
+        )
+
+    def senses(self, word: str) -> list:
+        """The synsets this backend will use as expansion roots."""
+        found = self._available_senses(word)
         if self.sense is not None:
             if not 0 <= self.sense < len(found):
                 raise ValueError(
@@ -149,6 +165,8 @@ class WordNetBackend:
                     f"{len(found)} sense(s) in WordNet"
                 )
             return [found[self.sense]]
+        if self.context:
+            return _context_roots(found, word, self.context)
         return found
 
     def expand(self, word: str, threshold: float) -> Iterable[Term]:
@@ -166,6 +184,7 @@ class WordNetBackend:
         which is what keeps a walk over a graph this size cheap.
         """
         query_key = word.replace(" ", "_").lower()
+        root_names = {synset.name() for synset in roots}
 
         # (cost, tiebreak, synset, path taken to reach it)
         frontier: list[tuple[float, int, object, str]] = []
@@ -192,7 +211,11 @@ class WordNetBackend:
                     # Lemmas inherit their synset's cost, but no lemma is ever
                     # nearer than SYNONYM: distance 0 means "the word you
                     # typed", and nothing else, so that -t 0 is plain grep.
-                    lemma_cost = max(cost, SYNONYM)
+                    lemma_cost = (
+                        _round(cost + SYNONYM)
+                        if synset.name() in root_names
+                        else max(cost, SYNONYM)
+                    )
                     if _within(lemma_cost, threshold):
                         yield Term(lemma_cost, name, via)
 
@@ -246,8 +269,68 @@ class WordNetBackend:
         """(index, synset name, gloss, lemmas) for each sense -- for --senses."""
         return [
             (i, s.name(), s.definition(), s.lemma_names())
-            for i, s in enumerate(self.senses(word))
+            for i, s in enumerate(self._available_senses(word))
         ]
+
+
+def _context_roots(roots: list, word: str, context: str) -> list:
+    """Keep the best-supported sense in each part of speech.
+
+    This is an extended Lesk overlap: definitions and examples carry more
+    weight than words borrowed from a one-hop neighbour. If the context shares
+    no meaningful word with WordNet, leave the expansion alone rather than
+    pretending that an arbitrary first sense was disambiguated.
+    """
+    wanted = _context_tokens(context) - _context_tokens(word)
+    if not wanted:
+        return roots
+
+    scored = []
+    best_by_pos: dict[str, int] = {}
+    for root in roots:
+        direct = _context_tokens(
+            " ".join([root.definition(), *root.examples(), *root.lemma_names()])
+        )
+        related = set()
+        neighbours = (
+            root.hypernyms()
+            + root.instance_hypernyms()
+            + root.hyponyms()
+            + root.instance_hyponyms()
+            + root.similar_tos()
+            + root.verb_groups()
+            + root.also_sees()
+        )
+        for neighbour in neighbours:
+            related.update(
+                _context_tokens(
+                    " ".join(
+                        [
+                            neighbour.definition(),
+                            *neighbour.examples(),
+                            *neighbour.lemma_names(),
+                        ]
+                    )
+                )
+            )
+        score = 3 * len(wanted & direct) + len(wanted & related)
+        scored.append((root, score))
+        best_by_pos[root.pos()] = max(best_by_pos.get(root.pos(), 0), score)
+
+    selected = [
+        root
+        for root, score in scored
+        if score > 0 and score == best_by_pos[root.pos()]
+    ]
+    return selected or roots
+
+
+def _context_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in _CONTEXT_WORD.findall(text.lower())
+        if token not in _CONTEXT_STOPWORDS
+    }
 
 
 def _sense_ranks(roots: list) -> dict:

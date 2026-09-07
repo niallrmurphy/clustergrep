@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.0
+
+- `--context TEXT` disambiguates WordNet expansion against the intended usage
+  and guides the local LLM toward domain terms while excluding other senses.
+  WordNet now also charges a less-common root sense before its synonym cost;
+  previously the synonym floor flattened several senses to the same distance
+  and defeated the documented sense penalty.
+- `--cluster-lines N` makes at most N bounded, online lexical-context groups
+  from all matching lines and prints one centroid-nearest representative from
+  each. Counts cover the full input, WordNet provenance strengthens grouping,
+  `--excerpt` remains available for long records, and JSON emits one object per
+  group with its terms, keywords, and representative evidence.
+- A local Ollama backend generates a coverage-saturated, bounded set of
+  alternatives under the common distance contract. Structured output,
+  temperature-zero requests, explicit rationales, and `--max-terms` keep the
+  generated cluster inspectable and pinnable as a thesaurus.
+
 ## 0.11.0
 
 - `--explain --tsv` no longer writes a term count into the header. The file

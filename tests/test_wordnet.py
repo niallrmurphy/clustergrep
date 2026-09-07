@@ -33,7 +33,7 @@ def test_synonyms_arrive_before_narrower_terms(backend):
 
 def test_the_obvious_neighbours_are_present(backend):
     d = expand(backend, "escape", 0.25).distances()
-    for word in ("jailbreak", "breakout", "getaway", "flee", "elude"):
+    for word in ("jailbreak", "breakout", "getaway", "flee"):
         assert word in d, word
 
 
@@ -70,8 +70,8 @@ def test_senses_are_ranked_within_a_part_of_speech_not_across_it():
     """The verb reading of a noun-first word must not be buried.
 
     WordNet lists all noun senses of "escape" before the first verb sense, so
-    ranking senses globally would charge "flee" a penalty for nothing more
-    than being a verb.
+    ranking senses globally would charge "break loose" a penalty for nothing
+    more than being a verb.
     """
     b = WordNetBackend()
     try:
@@ -79,14 +79,40 @@ def test_senses_are_ranked_within_a_part_of_speech_not_across_it():
     except BackendError as exc:
         pytest.skip(str(exc))
     d = Cluster.build("escape", "wordnet", b.expand("escape", 0.2), 0.2).distances()
-    assert "elude" in d
+    assert d["break loose"] == 0.15
 
 
 def test_a_rarer_sense_sits_further_out(backend):
-    d = expand(backend, "escape", 0.4).distances()
+    d = expand(backend, "escape", 0.5).distances()
     # The fluid-discharge sense of "escape" is a late noun sense, so its
     # synonyms must not rank alongside the prison-break ones.
     assert d["leakage"] > d["jailbreak"]
+
+
+def test_less_common_senses_pay_the_full_sense_penalty(backend):
+    d = expand(backend, "escape", 0.5)
+    assert d.distances()["flight"] == 0.15
+    assert d.distances()["escapism"] == 0.20
+    assert d.distances()["dodging"] == 0.25
+    assert d.distances()["leakage"] == 0.45
+
+
+def test_context_keeps_only_senses_supported_by_the_intended_usage(backend):
+    prison = expand(
+        backend,
+        "escape",
+        0.4,
+        context="physical act of a jailbreak: run away from confinement",
+    ).distances()
+    fluid = expand(
+        backend,
+        "escape",
+        0.4,
+        context="discharge or leak of fluid from a container",
+    ).distances()
+
+    assert "breakout" in prison and "leakage" not in prison
+    assert "leakage" in fluid and "breakout" not in fluid
 
 
 def test_sense_selection_pins_one_reading(backend):

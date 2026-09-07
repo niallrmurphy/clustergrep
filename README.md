@@ -19,14 +19,11 @@ look for*, once, up front, where you can read it and argue with it. After that,
 finding it is ordinary deterministic matching with nothing in the loop.
 
 ```console
-$ clustergrep -t 0.25 escape incidents.log
+$ clustergrep -t 0.25 --context 'run away from physical confinement or prison' escape incidents.log
 1:0.00:escape:2024-01-02 The prisoner escaped through the laundry chute.
 2:0.25:breakout:2024-01-03 Guards reported a breakout on B wing at 0300.
 4:0.20:flee:2024-01-05 Two inmates fled across the yard before dawn.
 5:0.25:jailbreak:2024-01-06 A jailbreak attempt was foiled by the perimeter fence.
-6:0.25:fly the coop:2024-01-07 He flew the coop while the van was being loaded.
-8:0.15:elude:2024-01-09 The suspect eluded officers for six hours.
-9:0.15:escapism:2024-01-10 Staff described a general air of escapism among the population.
 10:0.20:getaway:2024-01-11 Getaway vehicle recovered near the motorway.
 12:0.15:break loose:2024-01-13 The detainee broke loose during transfer.
 ```
@@ -153,22 +150,16 @@ which `--explain` will show:
 
 ```console
 $ clustergrep --explain -t 0.2 escape
-'escape' via wordnet, threshold 0.2: 15 term(s)
+'escape' via wordnet, threshold 0.2: 9 term(s)
   0.00  escape
   0.15  break loose  escape.v.01
-  0.15  dodging      evasion.n.03
-  0.15  elude        elude.v.02
-  0.15  escapism     escape.n.02
-  0.15  evasion      evasion.n.03
   0.15  flight       escape.n.01
   0.15  get away     escape.v.01
-  0.15  get by       get_off.v.05
-  0.15  get off      get_off.v.05
-  0.15  get out      get_off.v.05
-  0.15  miss         miss.v.09
   0.20  escapee      escape.v.01 -derivation-> escapee
+  0.20  escapism     escape.n.02
   0.20  flee         escape.n.01 -derivation-> flee
   0.20  getaway      escape.v.01 -derivation-> getaway
+  0.20  miss         miss.v.09
 ```
 
 | relation | cost | |
@@ -183,9 +174,20 @@ $ clustergrep --explain -t 0.2 escape
 
 Narrowing costs less than broadening, because a narrower term keeps you inside
 the concept while a broader one leaves it. Each successive dictionary sense of
-the word adds 0.05, so the dominant reading dominates the cluster. There is little
-that is truly objective about this scoring, but is pragmatically enough to work
-with right now, and we are open to other suggestions.
+the word adds 0.05 before the relation cost, so a synonym from a less-common
+sense cannot rank alongside a synonym from the dominant reading. There is
+little that is truly objective about this scoring, but it is inspectable and
+the threshold remains under your control.
+
+`--context TEXT` improves precision when the query is ambiguous. WordNet
+compares the intended usage with sense definitions, examples and immediate
+neighbours, then keeps the best-supported sense in each part of speech. If
+there is no meaningful overlap it leaves the cluster unchanged rather than
+guessing. Use `--sense N` when you want an exact, reproducible selection:
+
+```console
+$ clustergrep --context 'discharge or leak of fluid from a container' --explain escape
+```
 
 ## Backends
 
@@ -224,13 +226,18 @@ From then on the search is fully reproducible and a new term is a one-line diff.
 alternatives. It classifies each term as equivalent (`0.15`), narrower (`0.25`),
 associated (`0.35`), broader (`0.40`), or contextual (`0.50`); clustergrep maps
 those labels to fixed distances. Selecting `--backend llm` always generates the
-full set of relation classes; `--threshold` then filters that completed expansion,
-just as it does for WordNet. This is a calibrated judgement, not a graph
-measurement: use `--explain -t 1` to review every suggestion and reason, then
-`--tsv` to pin a trusted result. It always stops when the model reports completion,
-a batch adds nothing new, or `--max-terms` (or the optional `--llm-max-variants`)
-is reached. Set `--llm-url` for a non-default local endpoint and `--llm-timeout`
-to bound an individual request.
+full set of relation classes; `--threshold` then filters that completed
+expansion, just as it does for WordNet. This is a calibrated judgement, not a
+graph measurement: use `--explain -t 1` to review every suggestion and reason,
+then `--tsv` to pin a trusted result.
+
+With `--context`, the prompt favours the intended sense and can add domain
+jargon or euphemisms for recall without inviting terms from unrelated senses.
+The prompt also rejects polysemous common words likely to swamp useful matches.
+It always stops when the model reports completion, a batch adds nothing new, or
+`--max-terms` (or the optional `--llm-max-variants`) is reached. Set `--llm-url`
+for a non-default local endpoint and `--llm-timeout` to bound an individual
+request.
 
 ```bash
 ollama serve
@@ -252,31 +259,32 @@ Particular to this tool:
 | `--senses` | list the word's WordNet senses, for `--sense` |
 | `--pos n\|v\|a\|r` | one part of speech only |
 | `--sense N` | pin one reading of the word |
+| `--context TEXT` | describe the intended sense for WordNet or the LLM |
 | `--tune` | drop cluster terms that fire far more often than the query |
 | `--summary` | report which terms fired and how often; print no lines |
+| `--cluster-lines N` | group matching lines and print one representative per group |
 | `--excerpt N` | print ~N characters around each match, not the whole line |
 | `--stats` | the same report on stderr, alongside the normal results |
 | `--patterns` | every pattern that would match, for use as a prefilter |
 | `--sort` | nearest matches first |
-| `--json` | one object per match |
+| `--json` | one object per match, or per group with `--cluster-lines` |
 | `--no-inflect` | exact patterns only |
 | `--no-distance` | grep-shaped output |
 
 `--stats` is for tuning: 
 
 ```console
-$ clustergrep -t 0.4 escape incidents.log --stats -c
-10 match(es) from 10 of 62 cluster term(s)
-  0.00  escape                   1
-  0.25  breakout                 1
-  0.20  flee                     1
-  0.25  jailbreak                1
-  0.25  fly the coop             1
-  0.30  leakage                  1
-  0.15  elude                    1
-  0.15  escapism                 1
-  0.20  getaway                  1
-  0.15  break loose              1
+$ clustergrep -t 0.4 escape incidents.log --stats -c >/dev/null
+9 line(s) matched, 9 match(es), 9 of 55 cluster term(s) fired
+  0.00  escape        1
+  0.15  break loose   1
+  0.20  escapism      1
+  0.20  flee          1
+  0.20  getaway       1
+  0.25  breakout      1
+  0.25  jailbreak     1
+  0.30  elude         1
+  0.40  fly the coop  1
 ```
 
 ## Large files
@@ -317,6 +325,28 @@ ones, and each excerpt is labelled with the distance of the match it actually
 contains. `--excerpt N` sets the width; `-o` is the degenerate case of it,
 printing the match and nothing else. Under `--json` the window arrives as an
 `excerpt` field in place of `text`.
+
+`--cluster-lines N` keeps the findings themselves readable when a tally is too
+little and every matching line is too much. It makes at most N online groups
+from nearby words and phrases, the matched terms, and any WordNet root-sense
+provenance; then it prints the line nearest each group's centroid:
+
+```console
+$ clustergrep -t 0.4 --context 'run away from physical confinement' escape incidents.log --cluster-lines 4
+3 cluster(s) from 7 matching line(s)
+[1] 3 line(s); terms: break loose (1), fly (1), getaway (1)
+12:0.15:break loose:2024-01-13 The detainee broke loose during transfer.
+[2] 3 line(s); terms: breakout (1), flee (1), jailbreak (1)
+4:0.20:flee:2024-01-05 Two inmates fled across the yard before dawn.
+[3] 1 line(s); terms: escape (1); context: chute, laundry, prisoner
+1:0.00:escape:2024-01-02 The prisoner escaped through the laundry chute.
+```
+
+Counts cover the complete input, but memory does not grow with the number of
+matches: each group retains a capped centroid and one representative line.
+`--excerpt` also works here for page-sized records. With `--json`, each output
+object contains the group size, terms, keywords, and its representative record.
+No model runs over the findings; grouping is deterministic lexical analysis.
 
 `--patterns` answers the second. It prints every string the matcher would
 recognise — inflections included — which is exactly what a fast tool needs to
@@ -415,14 +445,20 @@ interchangeably, so the second pass is more permissive than the first.
 
 ## Known limits
 
-**Polysemy.** A cluster covers every sense of the word. At `-t 0.4`, "escape"
-reaches `leakage` and `outflow` via the concept of fluid-discharge, so a line about
-reactor coolant will match.
+**Polysemy.** Without `--context`, WordNet still considers every sense of the
+word. Less-common senses now pay their full penalty, but a sufficiently wide
+threshold can still admit unrelated readings. `--context` narrows this
+automatically; `--sense` pins one reading exactly.
 
 **`--tune` is statistical, not semantic.** It can only see how often a term
 fires, so a genuine synonym that happens to be commoner than your query looks
 identical to a polysemous intruder. It reports every term it drops for exactly
 this reason.
+
+**Finding clusters are approximate.** `--cluster-lines` is an online lexical
+grouping, not a second semantic judgement. Input order can affect a borderline
+assignment, and two lines with different vocabulary may remain separate even
+when a person would connect them. WordNet provenance helps when available.
 
 **Distances are not probabilities** and are not comparable between backends.
 They only order matches within one search.
