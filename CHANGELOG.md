@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.0
+## 0.13.0
 
 - `--context TEXT` disambiguates WordNet expansion against the intended usage
   and guides the local LLM toward domain terms while excluding other senses.
@@ -12,6 +12,9 @@
   each. Counts cover the full input, WordNet provenance strengthens grouping,
   `--excerpt` remains available for long records, and JSON emits one object per
   group with its terms, keywords, and representative evidence.
+
+## 0.12.0
+
 - A local Ollama backend generates a coverage-saturated, bounded set of
   alternatives under the common distance contract. Structured output,
   temperature-zero requests, explicit rationales, and `--max-terms` keep the
