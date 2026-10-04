@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.0
+
+- `--filter PATH` applies reusable JSON field selection, HTML visible-text
+  extraction, context rules, and excluded terms before reporting matches.
+- `--html-report PATH` writes a self-contained findings explorer with matched
+  text highlighting, JSON-aware display, semantic provenance, and bounded
+  per-term lexical context groups for drilling into high-volume results.
+
 ## 0.13.0
 
 - `--context TEXT` disambiguates WordNet expansion against the intended usage
