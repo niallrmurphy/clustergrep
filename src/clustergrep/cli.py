@@ -42,6 +42,7 @@ DEFAULT_MAX_TERMS = 250
 # them stays a screenful.
 DEFAULT_EXCERPT = 100
 _CLUSTER_CONTEXT = 400
+_REPORT_CONTEXT_GROUPS = 12
 
 # Read this much of a file to decide whether it is text, as grep does.
 _SNIFF = 8192
@@ -141,6 +142,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="only search files matching GLOB (repeatable)")
     g.add_argument("--exclude", action="append", metavar="GLOB", default=[],
                    help="skip files matching GLOB (repeatable)")
+    g.add_argument("--filter", dest="filter_file", metavar="PATH",
+                   help="apply a saved JSON input/context filter")
 
     g = p.add_argument_group("output")
     g.add_argument("-c", "--count", action="store_true",
@@ -174,6 +177,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="buffer output and print nearest matches first")
     g.add_argument("--json", action="store_true",
                    help="emit one JSON object per match")
+    g.add_argument("--html-report", metavar="PATH",
+                   help="write a self-contained findings explorer")
+    g.add_argument("--report-limit", type=int, default=5000, metavar="N",
+                   help="maximum findings embedded in an HTML report (default 5000)")
     g.add_argument("--stats", action="store_true",
                    help="alongside the results, report on stderr which terms fired")
     g.add_argument("--tune", action="store_true",
@@ -359,7 +366,7 @@ TUNE_MIN_QUERY = 20
 
 
 def tune(matcher: Matcher, paths, err: TextIO,
-         progress: Progress | None = None):
+         progress: Progress | None = None, filter_spec=None):
     """Drop cluster terms that are drowning the query, in one bounded pass.
 
     Returns (matcher, dropped, replay). ``replay`` holds lines already
@@ -391,7 +398,15 @@ def tune(matcher: Matcher, paths, err: TextIO,
                 read += len(raw)
                 if progress is not None:
                     progress.advance(len(raw))
-                for m in matcher.finditer(raw.rstrip("\n").rstrip("\r")):
+                line = raw.rstrip("\n").rstrip("\r")
+                if filter_spec is not None:
+                    line = filter_spec.prepare(line)
+                    if line is None:
+                        continue
+                    found = filter_spec.keep_matches(matcher.finditer(line))
+                else:
+                    found = matcher.finditer(line)
+                for m in found:
                     counts[m.term.text] += 1
                     matches += 1
                 if enough():
@@ -476,6 +491,7 @@ class LineHit:
     lineno: int
     line: str
     matches: list[Match]
+    source: str | None = None
 
     @property
     def best(self) -> Match | None:
@@ -511,6 +527,7 @@ def search_stream(
     limit: int | None,
     need_matches: bool = True,
     progress: Progress | None = None,
+    filter_spec=None,
 ) -> Iterator[LineHit]:
     """Yield the lines of ``stream`` that match, or that do not under ``invert``.
 
@@ -524,16 +541,29 @@ def search_stream(
     for lineno, raw in enumerate(stream, 1):
         if progress is not None:
             progress.advance(len(raw))
-        line = raw.rstrip("\n").rstrip("\r")
+        source = raw.rstrip("\n").rstrip("\r")
+        line = source
+        if filter_spec is not None:
+            line = filter_spec.prepare(line)
+            if line is None:
+                continue
         if need_matches:
             matches = matcher.search(line)
+            if filter_spec is not None:
+                matches = filter_spec.keep_matches(matches)
             hit = bool(matches)
         else:
-            matches = []
-            hit = probe(line) is not None
+            if filter_spec is not None and filter_spec.exclude_terms:
+                matches = filter_spec.keep_matches(matcher.search(line))
+                hit = bool(matches)
+            else:
+                matches = []
+                hit = probe(line) is not None
         if hit == invert:
             continue
-        yield LineHit(path=path, lineno=lineno, line=line, matches=matches)
+        yield LineHit(
+            path=path, lineno=lineno, line=line, matches=matches, source=source
+        )
         found += 1
         if limit is not None and found >= limit:
             return
@@ -671,6 +701,62 @@ class Printer:
             cursor = end
         out.append(window.text[cursor:])
         return "".join(out)
+
+
+def report_record(hit: LineHit) -> dict:
+    """One stable browser record per source line, with all match evidence."""
+    record = {
+        "id": f"{hit.path}:{hit.lineno}",
+        "file": hit.path,
+        "line": hit.lineno,
+        "text": _cluster_text(hit),
+        "source_length": len(hit.line),
+        "facets": list(_semantic_facets(hit.matches)),
+        "matches": [
+            {
+                "term": match.term.text,
+                "matched": match.text,
+                "distance": round(match.distance, 4),
+                "start": match.start,
+                "end": match.end,
+            }
+            for match in hit.matches
+        ],
+    }
+    source = hit.source if hit.source is not None else hit.line
+    looks_like_json = (
+        Path(hit.path).suffix.lower() in {".json", ".jsonl", ".ndjson"}
+        or source.lstrip().startswith(("{", "["))
+    )
+    if looks_like_json:
+        try:
+            parsed = json.loads(source)
+        except (TypeError, json.JSONDecodeError):
+            pass
+        else:
+            if isinstance(parsed, (dict, list)):
+                record["json"] = parsed
+    return record
+
+
+def report_contexts(
+    clusterers: dict[str, FindingClusterer],
+) -> dict[str, list[dict]]:
+    """Turn full-scan line clusters into report facets with sampled members."""
+    contexts = {}
+    for term, clusterer in sorted(clusterers.items()):
+        groups = []
+        for group in clusterer.groups():
+            label = ", ".join(group.keywords) or "other context"
+            groups.append({
+                "id": f"{term}:{group.id}",
+                "label": label,
+                "count": group.count,
+                "members": list(group.members),
+            })
+        if groups:
+            contexts[term] = groups
+    return contexts
 
 
 def render_explain(cluster: Cluster, ink: Ink, out: TextIO) -> None:
@@ -909,6 +995,30 @@ def _run(argv: Sequence[str] | None = None) -> int:
             parser.error(
                 "--cluster-lines cannot be combined with " + incompatible[0]
             )
+    if args.report_limit < 1:
+        parser.error(f"--report-limit must be at least 1, got {args.report_limit}")
+    if args.html_report:
+        incompatible = [
+            name
+            for name, enabled in (
+                ("--count", args.count),
+                ("--files-with-matches", args.files_with_matches),
+                ("--files-without-match", args.files_without_match),
+                ("--invert-match", args.invert_match),
+                ("--only-matching", args.only_matching),
+                ("--excerpt", args.excerpt is not None),
+                ("--json", args.json),
+                ("--sort", args.sort),
+                ("--summary", args.summary),
+                ("--cluster-lines", args.cluster_lines is not None),
+                ("--explain", args.explain),
+                ("--patterns", args.patterns),
+                ("--senses", args.senses),
+            )
+            if enabled
+        ]
+        if incompatible:
+            parser.error("--html-report cannot be combined with " + incompatible[0])
 
     ink = Ink(args.color == "always" or (args.color == "auto" and out.isatty()))
 
@@ -916,6 +1026,12 @@ def _run(argv: Sequence[str] | None = None) -> int:
         err.write(f"clustergrep: {message}\n")
 
     try:
+        if args.filter_file:
+            from .filters import FilterSpec
+
+            args.filter_spec = FilterSpec.load(args.filter_file)
+        else:
+            args.filter_spec = None
         backend = build_backend(args)
         if args.senses:
             if not hasattr(backend, "describe_senses"):
@@ -961,7 +1077,9 @@ def _run(argv: Sequence[str] | None = None) -> int:
             # Without this the prefilter keeps every line containing the
             # noise, which on a corpus where the noise is the common case
             # means it discards almost nothing and the fast path is not fast.
-            matcher, _, _ = tune(matcher, input_paths(args, warn), err)
+            matcher, _, _ = tune(
+                matcher, input_paths(args, warn), err, filter_spec=args.filter_spec
+            )
         out.write("".join(f"{pattern}\n" for pattern in matcher.patterns()))
         return EXIT_MATCH
 
@@ -1005,15 +1123,22 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
                replay: list[str] | None = None) -> int:
     paths = input_paths(args, warn)
 
+    if args.html_report:
+        report_path = Path(args.html_report).resolve()
+        if any(path is not None and path.resolve() == report_path for path in paths):
+            warn("--html-report must not overwrite an input file")
+            return EXIT_ERROR
+
     if args.filename is None:
         args.filename = len(paths) > 1 or args.recursive
 
     # Both --stats and --summary are claims about which terms fired, so they
     # force the slow path that collects every match rather than the first.
     counting = args.count or args.files_with_matches or args.files_without_match
-    quiet = counting or args.summary
+    quiet = counting or args.summary or bool(args.html_report)
     need_matches = (
         args.cluster_lines is not None
+        or args.html_report
         or args.stats
         or args.summary
         or not (quiet or args.invert_match)
@@ -1028,6 +1153,7 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
         matcher, _, replay = tune(
             matcher, paths, sys.stderr,
             Progress(None, showing, clock=_clock_for(args)),
+            filter_spec=args.filter_spec,
         )
 
     progress = Progress(_total_bytes(paths), showing, clock=_clock_for(args))
@@ -1042,6 +1168,8 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
     lines = 0
     matched_any = False
     buffered: list[LineHit] = []
+    report_records: list[dict] = []
+    report_clusterers: dict[str, FindingClusterer] = {}
 
     for path in paths:
         label = "(standard input)" if path is None else str(path)
@@ -1065,7 +1193,8 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
                                      invert=args.invert_match,
                                      limit=args.max_count,
                                      need_matches=need_matches,
-                                     progress=progress):
+                                     progress=progress,
+                                     filter_spec=args.filter_spec):
                 count += 1
                 lines += 1
                 matched_any = True
@@ -1081,6 +1210,34 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
                             matched=(match.text for match in hit.matches),
                             facets=_semantic_facets(hit.matches),
                             distance=best.distance,
+                        )
+                    continue
+                if args.html_report:
+                    record_id = None
+                    if len(report_records) < args.report_limit:
+                        record = report_record(hit)
+                        record_id = record["id"]
+                        report_records.append(record)
+                    by_term = {}
+                    for match in hit.matches:
+                        by_term.setdefault(match.term.text, []).append(match)
+                    context_text = _cluster_text(hit)
+                    for term, matches in by_term.items():
+                        clusterer = report_clusterers.setdefault(
+                            term,
+                            FindingClusterer(
+                                _REPORT_CONTEXT_GROUPS,
+                                matcher.cluster.query,
+                                retain_members=True,
+                            ),
+                        )
+                        clusterer.add(
+                            record_id,
+                            text=context_text,
+                            terms=(term,),
+                            matched=(match.text for match in matches),
+                            facets=_semantic_facets(matches),
+                            distance=min(match.distance for match in matches),
                         )
                     continue
                 if quiet:
@@ -1105,6 +1262,38 @@ def run_search(args, matcher: Matcher, ink: Ink, out: TextIO, warn,
             out.write(f"{ink.path(label)}\n")
 
     progress.done()
+
+    if args.html_report:
+        from .report import write_html_report
+
+        try:
+            write_html_report(
+                args.html_report,
+                metadata={
+                    "schema": "clustergrep.report/v1",
+                    "query": matcher.cluster.query,
+                    "backend": matcher.cluster.backend,
+                    "threshold": matcher.cluster.threshold,
+                    "lines_matched": lines,
+                    "records_embedded": len(report_records),
+                    "truncated": lines > len(report_records),
+                    "term_counts": dict(fired),
+                    "contexts": report_contexts(report_clusterers),
+                    "filter": (
+                        args.filter_spec.as_dict()
+                        if args.filter_spec is not None
+                        else {"version": 1}
+                    ),
+                },
+                records=report_records,
+            )
+        except OSError as exc:
+            warn(f"could not write HTML report: {exc}")
+            return EXIT_ERROR
+        warn(
+            f"wrote {args.html_report} with {len(report_records)} of "
+            f"{lines} matching line(s)"
+        )
 
     if line_clusterer is not None:
         render_finding_groups(line_clusterer.groups(), printer, out)

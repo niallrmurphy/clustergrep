@@ -50,11 +50,13 @@ _BIGRAM_PREFIX = f"{_FEATURE_PREFIX}bigram:"
 class FindingGroup(Generic[T]):
     """One line cluster and the line nearest its accumulated centroid."""
 
+    id: int
     count: int
     representative: T
     representative_distance: float
     terms: tuple[tuple[str, int], ...]
     keywords: tuple[str, ...]
+    members: tuple[T, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class _Group(Generic[T]):
     terms: Counter[str]
     representative: _Finding[T]
     first_index: int
+    members: list[T] | None
 
 
 class FindingClusterer(Generic[T]):
@@ -81,15 +84,19 @@ class FindingClusterer(Generic[T]):
 
     A new group is opened only for a line sufficiently unlike every existing
     centroid. Once ``limit`` groups exist, every later line joins its nearest
-    one. Group counts therefore cover the complete input even for a stream;
-    only one representative line per group is retained.
+    one. Group counts therefore cover the complete input even for a stream.
+    Only one representative per group is retained unless ``retain_members``
+    is requested for a separately bounded input such as an HTML report sample.
     """
 
-    def __init__(self, limit: int, query: str) -> None:
+    def __init__(
+        self, limit: int, query: str, *, retain_members: bool = False
+    ) -> None:
         if limit < 1:
             raise ValueError("finding cluster limit must be at least one")
         self.limit = limit
         self.query = query
+        self.retain_members = retain_members
         self._groups: list[_Group[T]] = []
         self._seen = 0
 
@@ -102,7 +109,7 @@ class FindingClusterer(Generic[T]):
         matched: Iterable[str],
         facets: Iterable[str] = (),
         distance: float,
-    ) -> None:
+    ) -> int:
         canonical_terms = tuple(sorted(set(terms)))
         finding = _Finding(
             item=item,
@@ -121,15 +128,16 @@ class FindingClusterer(Generic[T]):
         self._seen += 1
 
         if not self._groups:
-            self._groups.append(_new_group(finding))
-            return
+            self._groups.append(_new_group(finding, self.retain_members))
+            return finding.index
 
         similarities = [_cosine(finding.vector, group.vector) for group in self._groups]
         nearest = max(range(len(self._groups)), key=lambda i: (similarities[i], -i))
         if len(self._groups) < self.limit and similarities[nearest] < _JOIN_SIMILARITY:
-            self._groups.append(_new_group(finding))
-            return
+            self._groups.append(_new_group(finding, self.retain_members))
+            return finding.index
         _add_to_group(self._groups[nearest], finding)
+        return self._groups[nearest].first_index
 
     def groups(self) -> list[FindingGroup[T]]:
         if not self._groups:
@@ -152,28 +160,35 @@ class FindingClusterer(Generic[T]):
         )
         return [
             FindingGroup(
+                id=group.first_index,
                 count=group.count,
                 representative=group.representative.item,
                 representative_distance=group.representative.distance,
                 terms=tuple(sorted(group.terms.items(), key=lambda row: (-row[1], row[0]))),
                 keywords=_keywords(group, group_frequency, total_groups),
+                members=tuple(group.members or ()),
             )
             for group in ordered
         ]
 
 
-def _new_group(finding: _Finding[T]) -> _Group[T]:
+def _new_group(finding: _Finding[T], retain_members: bool) -> _Group[T]:
     return _Group(
         count=1,
         vector=Counter(finding.vector),
         terms=Counter(finding.terms),
         representative=finding,
         first_index=finding.index,
+        members=[finding.item] if retain_members and finding.item is not None else (
+            [] if retain_members else None
+        ),
     )
 
 
 def _add_to_group(group: _Group[T], finding: _Finding[T]) -> None:
     group.count += 1
+    if group.members is not None and finding.item is not None:
+        group.members.append(finding.item)
     group.vector.update(finding.vector)
     group.terms.update(finding.terms)
     if len(group.vector) > _PRUNE_CENTROID_AT:

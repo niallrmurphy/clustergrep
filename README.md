@@ -268,6 +268,8 @@ Particular to this tool:
 | `--patterns` | every pattern that would match, for use as a prefilter |
 | `--sort` | nearest matches first |
 | `--json` | one object per match, or per group with `--cluster-lines` |
+| `--filter PATH` | apply saved JSON-field, HTML, context and term filters |
+| `--html-report PATH` | write a self-contained interactive findings explorer |
 | `--no-inflect` | exact patterns only |
 | `--no-distance` | grep-shaped output |
 
@@ -286,6 +288,70 @@ $ clustergrep -t 0.4 escape incidents.log --stats -c >/dev/null
   0.30  elude         1
   0.40  fly the coop  1
 ```
+
+## Explore and save filters
+
+For a corpus where the first pass inevitably contains obvious distractions,
+write a self-contained report instead of scrolling through excerpts:
+
+```bash
+clustergrep -r --include '*.jsonl' -t 0.4 escape ./data \
+  --html-report escape-findings.html
+```
+
+The report can zoom into matching terms or context, remove a context such as
+`Shift-Escape`, hide a semantic term everywhere, and display only visible HTML
+text. **Download filter JSON** saves those decisions as a reproducible input to
+the next run:
+
+```bash
+clustergrep -r --include '*.jsonl' -t 0.4 escape ./data \
+  --filter clustergrep-filter.json \
+  --html-report escape-refined.html
+```
+
+A filter is deliberately plain JSON rather than UI state:
+
+```json
+{
+  "version": 1,
+  "input": {
+    "json_fields": ["title", "payload.body"],
+    "html": "visible_text"
+  },
+  "exclude": {
+    "context_regex": ["(?i)shift[- ]escape", "(?i)keyboard shortcut"],
+    "terms": ["leakage"]
+  },
+  "include": {
+    "context_regex": ["(?i)prison|custody|detention"]
+  }
+}
+```
+
+`json_fields` accepts dotted paths and prevents unrelated fields from entering
+the matcher. `visible_text` uses an HTML parser and omits tags plus script,
+style and template contents. Context rules apply to the resulting text;
+multiple include expressions are alternatives, while any exclude expression
+removes the record. Excluded terms remove that semantic match but retain a line
+when another non-excluded term also matched it.
+
+The complete input is still scanned, but the report embeds at most 5,000
+match-centred excerpts by default so a huge JSONL corpus cannot create a huge
+browser document. `--report-limit N` changes that ceiling, and the report says
+when its embedded sample is truncated.
+
+When an input line is valid JSON from a `.json`, `.jsonl`, or `.ndjson` file
+(or simply begins like a JSON object or array), the report offers a
+**Pretty-print JSON records** display. Matching text is highlighted in both
+plain and JSON views.
+
+Selecting a matched term reveals up to twelve approximate lexical context
+groups for that term. Their counts cover the complete scan, even when the
+report sample is truncated; selecting a group narrows the embedded findings
+to its available examples. A group first encountered beyond the embedding
+limit is still counted, but cannot be selected because it has no embedded
+example.
 
 ## Large files
 
